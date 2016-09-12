@@ -122,6 +122,8 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
 
   // SimilarityJoin Keywords
   protected val SIMILARITY = Keyword("SIMILARITY")
+  protected val SELFSIMILARITY = Keyword("SELFSIMILARITY")
+  protected val JACCARD = Keyword("JACCARD")
 
   protected lazy val start: Parser[LogicalPlan] =
     start1 | insert | cte
@@ -189,20 +191,25 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
       | ("(" ~> start <~ ")") ~ (AS.? ~> ident) ^^ { case s ~ a => Subquery(a, s) }
     )
 
-  protected lazy val joinedRelation: Parser[LogicalPlan] =
+  protected lazy val joinedRelation: Parser[LogicalPlan] = (
     relationFactor ~ rep1(joinType.? ~ (JOIN ~> relationFactor) ~ joinConditions.?) ^^ {
       case r1 ~ joins =>
         joins.foldLeft(r1) { case (lhs, jt ~ rhs ~ cond) =>
           Join(lhs, rhs, joinType = jt.getOrElse(Inner), cond)
         }
     }
+    )
 
   protected lazy val joinConditions: Parser[Expression] =
     ( ON ~> (POINT ~ "(" ~> repsep(termExpression, ",")  <~ ")") ~
-      (IN ~ KNN ~ "(" ~ POINT ~ "(" ~> repsep(termExpression, ",") <~ ")")
+      (IN ~ POINT ~ "(" ~ POINT ~ "(" ~> repsep(termExpression, ",") <~ ")")
       ~ ("," ~> literal <~ ")") ^^
       { case point ~ target ~ l => InKNN(point, target, l) }
     | ON ~> literal | ON ~> expression
+      | ON ~> (POINT ~ "(" ~> repsep(termExpression, ",")  <~ ")") ~
+      (IN ~ POINT ~ "(" ~ POINT ~ "(" ~> repsep(termExpression, ",") <~ ")")
+      ~ ("," ~> literal <~ ")") ^^
+      { case point ~ target ~ l => InJaccard(point, target, l) }
       )
 
   protected lazy val joinType: Parser[JoinType] =
@@ -215,6 +222,7 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
     | ZKNN            ^^^ ZKNNJoin
     | DISTANCE        ^^^ DistanceJoin
     | SIMILARITY      ^^^ SimilarityJoin
+    | SELFSIMILARITY  ^^^ SelfSimilarityJoin
     )
 
   protected lazy val sortType: Parser[LogicalPlan => LogicalPlan] =

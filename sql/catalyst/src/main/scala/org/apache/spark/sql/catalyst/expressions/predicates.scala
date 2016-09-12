@@ -318,6 +318,20 @@ case class InKNN(point: Seq[Expression],
   override def eval(input: InternalRow): Any = true
 }
 
+case class InJaccard(point: Seq[Expression],
+                 target: Seq[Expression],
+                 k: Literal) extends Predicate with CodegenFallback {
+  override def children: Seq[Expression] = point ++ target ++ Seq(k)
+
+  override def nullable: Boolean = false
+
+  override def toString: String = s" **($point) IN JACCARD ($target) with threshold ($k)"
+
+  // XX Tricky hack
+  /** Returns the result of evaluating this expression on a given input Row */
+  override def eval(input: InternalRow): Any = true
+}
+
 case class Intersects(left: Expression, right: Expression)
     extends BinaryExpression with Predicate with CodegenFallback {
   override def toString: String = s"**($left) INTERSECTS ($right)"

@@ -32,10 +32,10 @@ import scala.collection.mutable.ArrayBuffer
 
 
 
-case class JaccardSimilarityJoin(
-                          l: Literal,
-                          left: SparkPlan,
-                          right: SparkPlan) extends BinaryNode {
+case class JaccardSelfSimilarityJoin(
+                                  l: Literal,
+                                  left: SparkPlan,
+                                  right: SparkPlan) extends BinaryNode {
   override def output: Seq[Attribute] = left.output ++ right.output
 
   final val num_partitions = sqlContext.conf.numSimilarityPartitions.toInt
@@ -44,7 +44,7 @@ case class JaccardSimilarityJoin(
   final val topDegree = sqlContext.conf.similarityBalanceTopDegree.toInt
 
   override protected def doExecute(): RDD[InternalRow] = {
-    logInfo(s"execute IndexSimilarityJoin")
+    logInfo(s"execute JaccardSelfSimilarityJoin")
     val distribute = new Array[Long](2048)
 
     def CalculateH ( l: Int, s: Int, threshold: Double ) = {
@@ -314,14 +314,14 @@ case class JaccardSimilarityJoin(
         // 只考虑有变化的reducer的负载
         for (i <- 0 until H) yield {
           // 分配到1之后情况比较单一,只有inverseindex 和 inversequery匹配这一种情况,只会对一个reducer产生影响
-        val max = {
-          if (addToDistributeWhen1(i)._2 > 0) {
-            (distribute(addToDistributeWhen1(i)._1) +
-              addToDistributeWhen1(i)._2.toLong)*Math.pow(2, topDegree-1).toLong
-          } else {
-            0.toLong
+          val max = {
+            if (addToDistributeWhen1(i)._2 > 0) {
+              (distribute(addToDistributeWhen1(i)._1) +
+                addToDistributeWhen1(i)._2.toLong)*Math.pow(2, topDegree-1).toLong
+            } else {
+              0.toLong
+            }
           }
-        }
           max
         }
       }.toArray
@@ -420,16 +420,16 @@ case class JaccardSimilarityJoin(
 
 
     def partition_r(
-                   ss1: String,
-                   indexNum: scala.collection.Map[(Int, Int), Int],
-                   minimum: Int,
-                   group: Array[(Int, Int)],
-                   threshold: Double,
-                   alpha: Double,
-                   partitionNum: Int,
-                   topDegree: Int
-                 ): Array[(Array[(Array[Int], Array[Boolean])],
-                    Array[(Int, Boolean, Array[Boolean], Boolean, Int)])] = {
+                     ss1: String,
+                     indexNum: scala.collection.Map[(Int, Int), Int],
+                     minimum: Int,
+                     group: Array[(Int, Int)],
+                     threshold: Double,
+                     alpha: Double,
+                     partitionNum: Int,
+                     topDegree: Int
+                   ): Array[(Array[(Array[Int], Array[Boolean])],
+      Array[(Int, Boolean, Array[Boolean], Boolean, Int)])] = {
       var result = ArrayBuffer[(Array[(Array[Int], Array[Boolean])],
         Array[(Int, Boolean, Array[Boolean], Boolean, Int)])]()
       logInfo(s"partition_r: " + ss1)
@@ -442,12 +442,12 @@ case class JaccardSimilarityJoin(
       for (lrange <- range) {
         val l = lrange._1
         val isExtend = {
-//          if (l == range(range.length - 1)._1) {
-//            false
-//          }
-//          else {
-//            true
-//          }
+          //          if (l == range(range.length - 1)._1) {
+          //            false
+          //          }
+          //          else {
+          //            true
+          //          }
           true
         }
 
@@ -661,26 +661,26 @@ case class JaccardSimilarityJoin(
         .map(x => x._1)
         .distinct
 
-      for (i <- index; j <- query1) {
+      for (i <- index; j <- query1 if i._1 < j._1 ) {
         logInfo(s"verify: " + i._1 + " " + j._1)
         if (verify(i._2, j._2, threshold, pos)) {
           result += Tuple2(i._1, j._1)
         }
       }
       //      System.gc()
-      for (i <- deletionIndex; j <- query2) {
+      for (i <- deletionIndex; j <- query2 if i._1 < j._1 ) {
         logInfo(s"verify: " + i._1 + " " + j._1)
         if (verify(i._2, j._2, threshold, pos)) {
           result += Tuple2(i._1, j._1)
         }
       }
-      for (i <- index; j <- query2) {
+      for (i <- index; j <- query2 if i._1 < j._1 ) {
         logInfo(s"verify: " + i._1 + " " + j._1)
         if (verify(i._2, j._2, threshold, pos)) {
           result += Tuple2(i._1, j._1)
         }
       }
-      for (i <- index; j <- query3) {
+      for (i <- index; j <- query3 if i._1 < j._1 ) {
         logInfo(s"verify: " + i._1 + " " + j._1)
         if (verify(i._2, j._2, threshold, pos)) {
           result += Tuple2(i._1, j._1)
@@ -702,14 +702,14 @@ case class JaccardSimilarityJoin(
     }
 
     val left_rdd = left.execute().map(row =>
-      {
-        try {
-          row.getString(0)
-        } catch {
-          case e: NullPointerException => ""
-          case _ => ""
-        }
+    {
+      try {
+        row.getString(0)
+      } catch {
+        case e: NullPointerException => ""
+        case _ => ""
       }
+    }
     ).filter(x => (x.length > 0))
 
     val right_rdd = right.execute().map(row =>
@@ -723,7 +723,9 @@ case class JaccardSimilarityJoin(
     }
     ).filter(x => (x.length > 0))
 
-    val rdd1 = left_rdd.map(x => (x.split(" ").size)).persist(StorageLevel.DISK_ONLY)
+    val rdd1 = left_rdd
+      .map(x => (x.split(" ").size))
+      .persist(StorageLevel.DISK_ONLY)
     val minimum = sparkContext.broadcast(rdd1.min())
     val maximum = sparkContext.broadcast(rdd1.max())
     val count = sparkContext.broadcast(rdd1.count())
@@ -739,7 +741,7 @@ case class JaccardSimilarityJoin(
       .map(x => sortByValue(x))
       .distinct
       .persist(StorageLevel.DISK_ONLY)
-      // .map(x => mapTokenToId(tokenMapId.value, x))
+    // .map(x => mapTokenToId(tokenMapId.value, x))
     val multiGroup = sparkContext.broadcast(multigroup(minimum.value, maximum.value, threshold, alpha));
     val recordidMapSubstring = record
       .map(x => {
@@ -756,9 +758,11 @@ case class JaccardSimilarityJoin(
     val deletionMapRecord = recordidMapSubstring
       .filter(x => (x._2.length > 0))
       .flatMapValues(x => createDeletion(x)) // (string,i,l), deletionSubstring
-      .map(x => ((x._2, x._1._2, x._1._3), x._1._1)) // ((deletionSubstring, i, l), string)
+      .map(x => ((x._2, x._1._2, x._1._3), x._1._1))
+      .persist(StorageLevel.DISK_ONLY)// ((deletionSubstring, i, l), string)
     val inverseMapRecord = recordidMapSubstring
-        .map(x => ((x._2, x._1._2, x._1._3), x._1._1)) // ((inverseSubstring, i, l), string)
+        .map(x => ((x._2, x._1._2, x._1._3), x._1._1))
+        .persist(StorageLevel.DISK_ONLY)// ((inverseSubstring, i, l), string)
     val indexNum = sparkContext.broadcast(
         inverseMapRecord
           .map(x => ((x._1.hashCode, 0), 1))
@@ -780,7 +784,7 @@ case class JaccardSimilarityJoin(
             logInfo(s"inverseIndex: " + x._1._1 + " " + x._1._2.toString + " " + x._1._3.toString)
             ((x._1.hashCode(), false, Array(false), false, x._1._2), x._2)
           })
-      )
+      ).persist(StorageLevel.DISK_ONLY)
 
     val query_rdd = right_rdd
       // .filter(x => {val l = x.split(" "); l.length < 500 && l(0).length > 0})*/
@@ -796,16 +800,17 @@ case class JaccardSimilarityJoin(
       .map(x => ((x._1, x._2._1), x._2._2))
       .flatMapValues(x => x)
       .map(x => ((x._2._1, x._2._5), (x._1, x._2._2, x._2._3, x._2._4)))
-      // .union(index_rdd.map(s => ((s._1._1, s._1._5), (s._2, s._1._2, s._1._3, s._1._4))))
+      .persist(StorageLevel.DISK_ONLY)
 
-    query_rdd.union(index_rdd.map(s => ((s._1._1, s._1._5), (s._2, s._1._2, s._1._3, s._1._4))))
-        .groupByKey(new SimilarityHashPartitioner(num_partitions))
-        .map(x => (x._1, x._2.toArray))
-        .filter(x => x._2.length > 1)
-        .flatMap(x => { Descartes(x._1._2, x._2, threshold) } )
-        .map(x => InternalRow.
-          fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(x._1.toString),
-            org.apache.spark.unsafe.types.UTF8String.fromString(x._2.toString))))
+    query_rdd
+      .union(index_rdd.map(s => ((s._1._1, s._1._5), (s._2, s._1._2, s._1._3, s._1._4))))
+      .groupByKey(new SimilarityHashPartitioner(num_partitions))
+      .map(x => (x._1, x._2.toArray))
+      .filter(x => x._2.length > 1)
+      .flatMap(x => { Descartes(x._1._2, x._2, threshold) } )
+      .map(x => InternalRow.
+        fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(x._1.toString),
+          org.apache.spark.unsafe.types.UTF8String.fromString(x._2.toString))))
     // logInfo(result)
   }
 }

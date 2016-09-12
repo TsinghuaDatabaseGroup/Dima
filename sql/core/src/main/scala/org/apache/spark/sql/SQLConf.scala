@@ -466,7 +466,7 @@ private[spark] object SQLConf {
   val KNN_JOIN_METHOD = stringConf("spark.sql.joins.knnJoinMethod",
     defaultValue = Some("RTreeKNNJoin"))
   val SIMILARITY_JOIN_METHOD = stringConf("spark.sql.joins.similarityJoinMethod",
-    defaultValue = Some("IndexSimilarityJoin"))
+    defaultValue = Some("JaccardSimilarityJoin"))
   val NUM_SIMILARITY_PARTITIONS = stringConf("spark.sql.joins.numSimialrityPartitions",
     defaultValue = Some("2"))
   val SIMILARITY_JACCARD_THRESHOLD = stringConf("spark.sql.joins.similarityJaccardThreshold",

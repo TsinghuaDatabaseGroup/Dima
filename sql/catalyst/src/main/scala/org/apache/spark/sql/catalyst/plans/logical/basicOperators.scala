@@ -151,6 +151,9 @@ case class Join(
       case SimilarityJoin =>
         logInfo(s"JoinType: SimilarityJoin")
         left.output ++ right.output
+      case SelfSimilarityJoin =>
+        logInfo(s"JoinType: SelfSimilarityJoin")
+        left.output ++ right.output
       case _ =>
         left.output ++ right.output
     }

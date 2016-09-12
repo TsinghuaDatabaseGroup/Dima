@@ -74,14 +74,23 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
 
   object SimilarityJoinExtractor extends Strategy with PredicateHelper{
     def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
-      case ExtractSimilarityJoinKeys(k, SimilarityJoin, left, right) =>
+      case ExtractSimilarityJoinKeys(leftKeys, rightKeys, r, SimilarityJoin, left, right) =>
         sqlContext.conf.similarityJoinMethod match {
-          case "IndexSimilarityJoin" =>
-            logInfo(s"IndexSimilarityJoin")
-            JaccardSimilarityJoin(k, planLater(left), planLater(right)) :: Nil
+          case "JaccardSimilarityJoin" =>
+            logInfo(s"JaccardSimilarityJoin")
+            JaccardSimilarityJoin(leftKeys, rightKeys, r, planLater(left), planLater(right)) :: Nil
           case _ =>
-            logInfo(s"SimilarityJoinExtractor: IndexSimilarityJoin")
-            JaccardSimilarityJoin(k, planLater(left), planLater(right)) :: Nil
+            logInfo(s"SimilarityJoinExtractor: JaccardSimilarityJoin")
+            JaccardSimilarityJoin(leftKeys, rightKeys, r, planLater(left), planLater(right)) :: Nil
+        }
+      case ExtractSelfSimilarityJoinKeys(r, SelfSimilarityJoin, left, right) =>
+        sqlContext.conf.similarityJoinMethod match {
+          case "JaccardSelfSimilarityJoin" =>
+            logInfo(s"JaccardSelfSimilarityJoin")
+            JaccardSelfSimilarityJoin(r, planLater(left), planLater(right)) :: Nil
+          case _ =>
+            logInfo(s"JaccardSelfSimilarityJoin")
+            JaccardSelfSimilarityJoin(r, planLater(left), planLater(right)) :: Nil
         }
       case _ => Nil
     }

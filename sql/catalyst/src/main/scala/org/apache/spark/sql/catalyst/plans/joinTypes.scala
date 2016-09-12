@@ -28,6 +28,7 @@ object JoinType {
     case "distance" => DistanceJoin
     case "zknn" => ZKNNJoin
     case "similarity" => SimilarityJoin
+    case "selfsimilarity" => SelfSimilarityJoin
     case _ =>
       val supported = Seq(
         "inner",
@@ -35,7 +36,7 @@ object JoinType {
         "leftouter", "left",
         "rightouter", "right",
         "leftsemi", "knn", "distance", "zknn",
-        "similarity")
+        "similarity", "selfsimilarity")
 
       throw new IllegalArgumentException(s"Unsupported join type '$typ'. " +
         "Supported join types include: " + supported.mkString("'", "', '", "'") + ".")
@@ -61,3 +62,5 @@ case object DistanceJoin extends JoinType
 case object ZKNNJoin extends JoinType
 
 case object SimilarityJoin extends JoinType
+
+case object SelfSimilarityJoin extends JoinType
