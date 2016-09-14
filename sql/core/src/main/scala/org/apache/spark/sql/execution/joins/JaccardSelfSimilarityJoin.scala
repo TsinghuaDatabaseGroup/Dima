@@ -436,7 +436,7 @@ case class JaccardSelfSimilarityJoin(
       var ss = ss1.split(" ")
       val s = ss.size
       val range = group.filter(
-        x => (x._1 <= Math.floor(s / threshold).toInt &&
+        x => (x._1 <= s &&
           x._2 >= (Math.ceil(threshold * s) + 0.0001).toInt)
       )
       for (lrange <- range) {
@@ -661,26 +661,46 @@ case class JaccardSelfSimilarityJoin(
         .map(x => x._1)
         .distinct
 
-      for (i <- index; j <- query1 if i._1 < j._1 ) {
+      for (i <- index; j <- query1
+           if {
+             val i_length = i._2.map(_._1.length).reduce(_ + _)
+             val j_length = j._2.map(_._1.length).reduce(_ + _)
+             (i_length == j_length && i._1 < j._1) || (i_length != j_length && i._1 != j._1)
+           }) {
         logInfo(s"verify: " + i._1 + " " + j._1)
         if (verify(i._2, j._2, threshold, pos)) {
           result += Tuple2(i._1, j._1)
         }
       }
       //      System.gc()
-      for (i <- deletionIndex; j <- query2 if i._1 < j._1 ) {
+      for (i <- deletionIndex; j <- query2
+           if {
+             val i_length = i._2.map(_._1.length).reduce(_ + _)
+             val j_length = j._2.map(_._1.length).reduce(_ + _)
+             (i_length == j_length && i._1 < j._1) || (i_length != j_length && i._1 != j._1)
+           }) {
         logInfo(s"verify: " + i._1 + " " + j._1)
         if (verify(i._2, j._2, threshold, pos)) {
           result += Tuple2(i._1, j._1)
         }
       }
-      for (i <- index; j <- query2 if i._1 < j._1 ) {
+      for (i <- index; j <- query2
+           if {
+             val i_length = i._2.map(_._1.length).reduce(_ + _)
+             val j_length = j._2.map(_._1.length).reduce(_ + _)
+             (i_length == j_length && i._1 < j._1) || (i_length != j_length && i._1 != j._1)
+           }) {
         logInfo(s"verify: " + i._1 + " " + j._1)
         if (verify(i._2, j._2, threshold, pos)) {
           result += Tuple2(i._1, j._1)
         }
       }
-      for (i <- index; j <- query3 if i._1 < j._1 ) {
+      for (i <- index; j <- query3
+           if {
+             val i_length = i._2.map(_._1.length).reduce(_ + _)
+             val j_length = j._2.map(_._1.length).reduce(_ + _)
+             (i_length == j_length && i._1 < j._1) || (i_length != j_length && i._1 != j._1)
+           }) {
         logInfo(s"verify: " + i._1 + " " + j._1)
         if (verify(i._2, j._2, threshold, pos)) {
           result += Tuple2(i._1, j._1)
@@ -732,17 +752,17 @@ case class JaccardSelfSimilarityJoin(
     val average = sparkContext.broadcast(rdd1.sum() / count.value)
     rdd1.unpersist()
 
-    logInfo(s"" + minimum.value.toString +
-      maximum.value.toString +
-      average.value.toString +
-      count.value.toString)
+    logInfo(s"" + minimum.value.toString + " "
+      + maximum.value.toString + " "
+      + average.value.toString + " "
+      + count.value.toString)
     val record = left_rdd
       // .filter(x => {val l = x.split(" "); l.length < 500 && l(0).length > 0})*/
       .map(x => sortByValue(x))
       .distinct
       .persist(StorageLevel.DISK_ONLY)
     // .map(x => mapTokenToId(tokenMapId.value, x))
-    val multiGroup = sparkContext.broadcast(multigroup(minimum.value, maximum.value, threshold, alpha));
+    val multiGroup = sparkContext.broadcast(multigroup(minimum.value, maximum.value, threshold, alpha))
     val recordidMapSubstring = record
       .map(x => {
         logInfo(s"" + x)
