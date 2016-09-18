@@ -466,10 +466,10 @@ case class JaccardSelfSimilarityJoin(
         for (i <- 1 until H + 1) {
           val p = ss.filter(x => x.toInt % H + 1 == i);
           records += Tuple2(p.map(x => x.toInt), {
-            if (V(i-1)==0) Array()
-            else if (V(i-1)==1) Array(false)
-            else Array(true))
-          }
+            if (V(i - 1) == 0) Array()
+            else if (V(i - 1) == 1) Array(false)
+            else Array(true)
+          })
         }
 
         var result1 = ArrayBuffer[(Int, Boolean, Array[Boolean], Boolean, Int)]()
@@ -512,7 +512,9 @@ case class JaccardSelfSimilarityJoin(
       //      val substring = {
       //        for (i <- 1 until H + 1) yield {
       //          val p = ss.filter(x => x.toInt % H + 1 == i);
-      //          if (p.length == 0) "".toString else if (p.length == 1) p(0) else p.reduce(_ + " " + _)
+      //          if (p.length == 0) "".toString
+      //          else if (p.length == 1) p(0)
+      //          else p.reduce(_ + " " + _)
       //        }
       //      }.toArray
       //      for (i <- 1 until H + 1) {
@@ -526,7 +528,7 @@ case class JaccardSelfSimilarityJoin(
       //        }
       //      }
       //    }
-      result.toArray//(hash, isDeletion, V, isExtend)
+      result.toArray
       // (hash, isDeletion, V, isExtend)
     }
 
@@ -756,19 +758,7 @@ case class JaccardSelfSimilarityJoin(
         case e: NullPointerException => ""
         case _ => ""
       }
-    }
-    ).filter(x => (x.length > 0))
-
-    val right_rdd = right.execute().map(row =>
-    {
-      try {
-        row.getString(0)
-      } catch {
-        case e: NullPointerException => ""
-        case _ => ""
-      }
-    }
-    ).filter(x => (x.length > 0))
+    }).filter(x => (x.length > 0))
 
     val rdd1 = left_rdd
       .map(x => (x.split(" ").size))
@@ -820,10 +810,7 @@ case class JaccardSelfSimilarityJoin(
       )
     recordidMapSubstring.unpersist()
 
-    val query_rdd = left_rdd
-      // .filter(x => {val l = x.split(" "); l.length < 500 && l(0).length > 0})*/
-      .map(x => sortByValue(x))
-      .distinct
+    val query_rdd = record
       .map(x => (x.hashCode,
         partition_r(
           x, indexNum.value, minimum.value, multiGroup.value,
