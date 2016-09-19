@@ -16,11 +16,33 @@
  */
 package org.apache.spark.sql.partitioner
 
-import org.apache.spark.Partitioner
+import org.apache.spark.rdd.{RDD, ShuffledRDD}
+import org.apache.spark.shuffle.sort.SortShuffleManager
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.execution.SparkSqlSerializer
+import org.apache.spark.util.MutablePair
+import org.apache.spark.{Partitioner, SparkConf, SparkEnv}
 
-/**
-  * Created by sunji on 16/9/5.
-  */
+object SimilarityHashPartition {
+  def sortBasedShuffleOn: Boolean = SparkEnv.get.shuffleManager.isInstanceOf[SortShuffleManager]
+
+  def apply(origin: RDD[(Any, InternalRow)], num_partitions: Int): RDD[(Any, InternalRow)] = {
+    val rdd = if (sortBasedShuffleOn) {
+      origin.mapPartitions {iter => iter.map(row => (row._1, row._2.copy()))}
+    } else {
+      origin.mapPartitions {iter =>
+        val mutablePair = new MutablePair[Any, InternalRow]()
+        iter.map(row => mutablePair.update(row._1, row._2.copy()))
+      }
+    }
+
+    val part = new SimilarityHashPartitioner(num_partitions)
+    val shuffled = new ShuffledRDD[Any, InternalRow, InternalRow](rdd, part)
+    shuffled.setSerializer(new SparkSqlSerializer(new SparkConf(false)))
+    shuffled
+  }
+}
+
 class SimilarityHashPartitioner(numParts: Int) extends Partitioner {
   override def numPartitions: Int = numParts
   override def getPartition(key: Any): Int = {

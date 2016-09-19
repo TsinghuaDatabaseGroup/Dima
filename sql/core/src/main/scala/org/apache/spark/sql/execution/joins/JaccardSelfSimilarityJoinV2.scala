@@ -23,6 +23,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, Literal}
 import org.apache.spark.sql.execution.{BinaryNode, SparkPlan}
 import org.apache.spark.sql.partitioner.SimilarityHashPartitioner
 import org.apache.spark.storage.StorageLevel
+import scala.collection.mutable.Map
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -659,6 +660,83 @@ case class JaccardSelfSimilarityJoinV2(
       }
     }
 
+    def findSimilarity(query: (Int, ((Int, Array[(Array[Int], Array[Boolean])]),
+      Boolean, Array[Boolean], Boolean, Int)), index: (Map[Int, List[Int]],
+      Array[((Int, Array[(Array[Int], Array[Boolean])]),
+      Boolean, Array[Boolean], Boolean, Int)]), numPartitions: Int) : Array[Tuple2[Int, Int]] = {
+      val result = ArrayBuffer[(Int, Int)]()
+//      val code = (query._1 % numPartitions)
+//      val partitionPos = {
+//        if (code < 0) {
+//          code + numPartitions
+//        } else {
+//          code
+//        }
+//      }
+      logInfo(s"" + query._1.toString)
+        // this is the partition which I want to search
+      if (index._1.contains(query._1)) {
+        for (i <- index._1(query._1)) {
+          if (compareSimilarity(query._2, index._2(i))) {
+            result += Tuple2(query._2._1._1, index._2(i)._1._1)
+          }
+        }
+      }
+      result.toArray
+    }
+
+    def compareSimilarity(x1: ((Int, Array[(Array[Int], Array[Boolean])]),
+      Boolean, Array[Boolean], Boolean, Int), x2: ((Int, Array[(Array[Int], Array[Boolean])]),
+      Boolean, Array[Boolean], Boolean, Int)): Boolean = {
+      val pos = x1._5
+      if (x1._2) {
+        // it's a deletion index
+        if (!x2._2 && x2._3.length > 0 && x2._3(0)) {
+          // query from inverse with value 2
+          if (x1._1._1 != x2._1._1) {
+            verify(x1._1._2, x2._1._2, threshold, pos)
+          } else {
+            false
+          }
+        } else {
+          false
+        }
+      } else {
+        // it's a reverse index
+        if (!x2._2 && !x2._4 && x2._3.length > 0) {
+          // query from inverse index with value 2 or 1
+          if (x1._1._1 < x2._1._1) {
+            verify(x1._1._2, x2._1._2, threshold, pos)
+          } else {
+            false
+          }
+        } else if (!x2._2 && x2._4 && x2._3.length > 0){
+          // query from inverse query with value 2 or 1
+          if (x1._1._1 != x2._1._1) {
+            verify(x1._1._2, x2._1._2, threshold, pos)
+          } else {
+            false
+          }
+        } else if (x2._2 && !x2._4 && x2._3.length > 0 && x2._3(0)) {
+          // query from deletion index with value 2
+          if (x1._1._1 < x2._1._1) {
+            verify(x1._1._2, x2._1._2, threshold, pos)
+          } else {
+            false
+          }
+        } else if (x2._2 && x2._4 && x2._3.length > 0 && x2._3(0)) {
+          // query from deletion query with value 2
+          if (x1._1._1 != x2._1._1) {
+            verify(x1._1._2, x2._1._2, threshold, pos)
+          } else {
+            false
+          }
+        } else {
+          false
+        }
+      }
+    }
+
     def Descartes(
                    x: Array[((Int, Array[(Array[Int], Array[Boolean])]),
                      Boolean, Array[Boolean], Boolean, Int)], threshold: Double
@@ -826,14 +904,43 @@ case class JaccardSelfSimilarityJoinV2(
       .map(x => (x._2._1, (x._1, x._2._2, x._2._3, x._2._4, x._2._5)))
       .persist(StorageLevel.DISK_ONLY)
 
-    query_rdd
-      .groupByKey(new SimilarityHashPartitioner(num_partitions))
-      .map(x => (x._1, x._2.toArray))
-      .filter(x => x._2.length > 1)
-      .flatMap(x => { Descartes(x._2, threshold) } )
-      .map(x => InternalRow.
-        fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(x._1.toString),
-          org.apache.spark.unsafe.types.UTF8String.fromString(x._2.toString))))
+    val query_rdd_partitioned = query_rdd
+      .partitionBy(new SimilarityHashPartitioner(num_partitions))
+      .persist(StorageLevel.DISK_ONLY)
+
+    // 全局索引 就是hash
+    // 现在开始为每一个partition建索引
+    val index_rdd_indexed = query_rdd_partitioned
+      .filter(x => !x._2._4)
+      .mapPartitions(iter => {
+        val data = iter.toArray
+        val index = Map[Int, List[Int]]()
+        for (i <- 0 until data.length) {
+          if (index.contains(data(i)._1)) {
+            val position = index(data(i)._1)
+            index += (data(i)._1 -> (position ::: List(i)))
+          }
+        }
+        Array((index, data.map(x => x._2))).iterator
+      }).persist()
+
+    query_rdd_partitioned.zipPartitions(index_rdd_indexed) {
+        (leftIter, rightIter) => {
+          val index = rightIter.next
+        leftIter
+          .flatMap (row => findSimilarity(row, index, num_partitions))
+          .map(x => InternalRow.
+            fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(x._1.toString),
+              org.apache.spark.unsafe.types.UTF8String.fromString(x._2.toString))))
+          .toArray.iterator
+      }
+    }
+//    query_rdd
+//      .map(x => findSimilarity(x, query_rdd_indexed, num_partitions))
+//      .flatMap(x => x)
+//      .map (x => InternalRow.
+//        fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(x._1.toString),
+//          org.apache.spark.unsafe.types.UTF8String.fromString(x._2.toString))))
     // logInfo(result)
   }
 }

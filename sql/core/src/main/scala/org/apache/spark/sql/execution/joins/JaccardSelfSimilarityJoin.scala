@@ -661,12 +661,16 @@ case class JaccardSelfSimilarityJoin(
     }
 
     def Descartes(
-                   pos: Int,
                    x: Array[((Int, Array[(Array[Int], Array[Boolean])]),
-                     Boolean, Array[Boolean], Boolean)], threshold: Double
+                     Boolean, Array[Boolean], Boolean, Int)], threshold: Double
                  ) : ArrayBuffer[(Int, Int)] = {
       var result = ArrayBuffer[(Int, Int)]()
 
+      if (x.length == 0) {
+        return result
+      }
+
+      val pos = x(0)._5
       val index = x
         .filter(
           s => !s._2 && !s._4
@@ -820,14 +824,14 @@ case class JaccardSelfSimilarityJoin(
       .flatMapValues(x => x)
       .map(x => ((x._1, x._2._1), x._2._2))
       .flatMapValues(x => x)
-      .map(x => ((x._2._1, x._2._5), (x._1, x._2._2, x._2._3, x._2._4)))
+      .map(x => (x._2._1, (x._1, x._2._2, x._2._3, x._2._4, x._2._5)))
       .persist(StorageLevel.DISK_ONLY)
 
     query_rdd
       .groupByKey(new SimilarityHashPartitioner(num_partitions))
       .map(x => (x._1, x._2.toArray))
       .filter(x => x._2.length > 1)
-      .flatMap(x => { Descartes(x._1._2, x._2, threshold) } )
+      .flatMap(x => { Descartes(x._2, threshold) } )
       .map(x => InternalRow.
         fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(x._1.toString),
           org.apache.spark.unsafe.types.UTF8String.fromString(x._2.toString))))
