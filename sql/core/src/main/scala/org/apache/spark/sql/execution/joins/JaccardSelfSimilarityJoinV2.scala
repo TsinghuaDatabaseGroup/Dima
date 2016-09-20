@@ -678,7 +678,10 @@ case class JaccardSelfSimilarityJoinV2(
       if (index._1.contains(query._1)) {
         for (i <- index._1(query._1)) {
           if (compareSimilarity(query._2, index._2(i))) {
+            logInfo(s"success")
             result += Tuple2(query._2._1._1, index._2(i)._1._1)
+          } else {
+            logInfo(s"failed")
           }
         }
       }
@@ -688,6 +691,7 @@ case class JaccardSelfSimilarityJoinV2(
     def compareSimilarity(x1: ((Int, Array[(Array[Int], Array[Boolean])]),
       Boolean, Array[Boolean], Boolean, Int), x2: ((Int, Array[(Array[Int], Array[Boolean])]),
       Boolean, Array[Boolean], Boolean, Int)): Boolean = {
+      logInfo(s"comparing " + x1._1._1.toString + " and " + x2._1._1.toString)
       val pos = x1._5
       if (x1._2) {
         // it's a deletion index
@@ -705,7 +709,7 @@ case class JaccardSelfSimilarityJoinV2(
         // it's a reverse index
         if (!x2._2 && !x2._4 && x2._3.length > 0) {
           // query from inverse index with value 2 or 1
-          if (x1._1._1 < x2._1._1) {
+          if (x1._1._1 != x2._1._1) {
             verify(x1._1._2, x2._1._2, threshold, pos)
           } else {
             false
@@ -719,7 +723,7 @@ case class JaccardSelfSimilarityJoinV2(
           }
         } else if (x2._2 && !x2._4 && x2._3.length > 0 && x2._3(0)) {
           // query from deletion index with value 2
-          if (x1._1._1 < x2._1._1) {
+          if (x1._1._1 != x2._1._1) {
             verify(x1._1._2, x2._1._2, threshold, pos)
           } else {
             false
@@ -915,18 +919,23 @@ case class JaccardSelfSimilarityJoinV2(
       .mapPartitions(iter => {
         val data = iter.toArray
         val index = Map[Int, List[Int]]()
+        logInfo(s"data length: " + data.length.toString)
         for (i <- 0 until data.length) {
           if (index.contains(data(i)._1)) {
             val position = index(data(i)._1)
             index += (data(i)._1 -> (position ::: List(i)))
+          } else {
+            index += (data(i)._1 -> List(i))
           }
         }
+        logInfo(s"index length: " + index.size.toString)
         Array((index, data.map(x => x._2))).iterator
       }).persist()
 
     query_rdd_partitioned.zipPartitions(index_rdd_indexed) {
         (leftIter, rightIter) => {
           val index = rightIter.next
+          logInfo(s"index data length: " + index._2.length.toString)
         leftIter
           .flatMap (row => findSimilarity(row, index, num_partitions))
           .map(x => InternalRow.
