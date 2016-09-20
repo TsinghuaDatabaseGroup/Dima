@@ -688,17 +688,17 @@ case class JaccardSelfSimilarityJoinV2(
       result.toArray
     }
 
-    def compareSimilarity(x1: ((Int, Array[(Array[Int], Array[Boolean])]),
-      Boolean, Array[Boolean], Boolean, Int), x2: ((Int, Array[(Array[Int], Array[Boolean])]),
+    def compareSimilarity(query: ((Int, Array[(Array[Int], Array[Boolean])]),
+      Boolean, Array[Boolean], Boolean, Int), index: ((Int, Array[(Array[Int], Array[Boolean])]),
       Boolean, Array[Boolean], Boolean, Int)): Boolean = {
-      logInfo(s"comparing " + x1._1._1.toString + " and " + x2._1._1.toString)
-      val pos = x1._5
-      if (x1._2) {
+      logInfo(s"comparing " + query._1._1.toString + " and " + index._1._1.toString)
+      val pos = query._5
+      if (index._2) {
         // it's a deletion index
-        if (!x2._2 && x2._3.length > 0 && x2._3(0)) {
+        if (!query._2 && query._3.length > 0 && query._3(0)) {
           // query from inverse with value 2
-          if (x1._1._1 != x2._1._1) {
-            verify(x1._1._2, x2._1._2, threshold, pos)
+          if (query._1._1 != index._1._1) {
+            verify(query._1._2, index._1._2, threshold, pos)
           } else {
             false
           }
@@ -707,31 +707,31 @@ case class JaccardSelfSimilarityJoinV2(
         }
       } else {
         // it's a reverse index
-        if (!x2._2 && !x2._4 && x2._3.length > 0) {
+        if (!query._2 && !query._4 && query._3.length > 0) {
           // query from inverse index with value 2 or 1
-          if (x1._1._1 != x2._1._1) {
-            verify(x1._1._2, x2._1._2, threshold, pos)
+          if (query._1._1 < index._1._1) {
+            verify(query._1._2, index._1._2, threshold, pos)
           } else {
             false
           }
-        } else if (!x2._2 && x2._4 && x2._3.length > 0){
+        } else if (!query._2 && query._4 && query._3.length > 0){
           // query from inverse query with value 2 or 1
-          if (x1._1._1 != x2._1._1) {
-            verify(x1._1._2, x2._1._2, threshold, pos)
+          if (query._1._1 != index._1._1) {
+            verify(query._1._2, index._1._2, threshold, pos)
           } else {
             false
           }
-        } else if (x2._2 && !x2._4 && x2._3.length > 0 && x2._3(0)) {
+        } else if (query._2 && !query._4 && query._3.length > 0 && query._3(0)) {
           // query from deletion index with value 2
-          if (x1._1._1 != x2._1._1) {
-            verify(x1._1._2, x2._1._2, threshold, pos)
+          if (query._1._1 < index._1._1) {
+            verify(query._1._2, index._1._2, threshold, pos)
           } else {
             false
           }
-        } else if (x2._2 && x2._4 && x2._3.length > 0 && x2._3(0)) {
+        } else if (query._2 && query._4 && query._3.length > 0 && query._3(0)) {
           // query from deletion query with value 2
-          if (x1._1._1 != x2._1._1) {
-            verify(x1._1._2, x2._1._2, threshold, pos)
+          if (query._1._1 != index._1._1) {
+            verify(query._1._2, index._1._2, threshold, pos)
           } else {
             false
           }

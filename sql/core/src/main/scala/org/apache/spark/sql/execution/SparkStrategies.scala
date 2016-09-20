@@ -78,10 +78,10 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         sqlContext.conf.similarityJoinMethod match {
           case "JaccardSimilarityJoin" =>
             logInfo(s"JaccardSimilarityJoin")
-            JaccardSimilarityJoin(leftKeys, rightKeys, r, planLater(left), planLater(right)) :: Nil
+            JaccardSimilarityJoinV2(leftKeys, rightKeys, r, planLater(left), planLater(right)) :: Nil
           case _ =>
             logInfo(s"SimilarityJoinExtractor: JaccardSimilarityJoin")
-            JaccardSimilarityJoin(leftKeys, rightKeys, r, planLater(left), planLater(right)) :: Nil
+            JaccardSimilarityJoinV2(leftKeys, rightKeys, r, planLater(left), planLater(right)) :: Nil
         }
       case ExtractSelfSimilarityJoinKeys(r, SelfSimilarityJoin, left, right) =>
         sqlContext.conf.similarityJoinMethod match {
