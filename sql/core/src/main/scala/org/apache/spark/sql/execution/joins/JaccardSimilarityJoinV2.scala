@@ -632,14 +632,6 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
       Array[((Int, Array[(Array[Int], Array[Boolean])]),
         Boolean, Array[Boolean], Boolean, Int)]), numPartitions: Int) : Array[Tuple2[Int, Int]] = {
       val result = ArrayBuffer[(Int, Int)]()
-      //      val code = (query._1 % numPartitions)
-      //      val partitionPos = {
-      //        if (code < 0) {
-      //          code + numPartitions
-      //        } else {
-      //          code
-      //        }
-      //      }
       logInfo(s"" + query._1.toString)
       // this is the partition which I want to search
       if (index._1.contains(query._1)) {
