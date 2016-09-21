@@ -57,7 +57,7 @@ case class EditDistanceSimilarityJoin(
 
     def right_child(i: Int) = 2 * i + 1
 
-    def compare(x: (Long, Long), y: (Long, Long)) : Short = {
+    def compare(x: (Long, Long), y: (Long, Long)): Short = {
       if (x._1 > y._1) {
         1
       } else if (x._1 < y._1) {
@@ -425,7 +425,9 @@ case class EditDistanceSimilarityJoin(
           val length = Math.floor(l / (U + 1)).toInt
           val seg = sss.slice(point, point + length)
           point = point + length
-          ss += Tuple2(({if (seg.length == 0) "" else seg.reduce(_ + " " + _)}, i, l, 0).hashCode(),
+          ss += Tuple2(( {
+            if (seg.length == 0) "" else seg.reduce(_ + " " + _)
+          }, i, l, 0).hashCode(),
             ValueInfo(s, false, Array[Boolean]()))
           for (n <- 0 until length) {
             val subset = Array.concat(sss.slice(point, point + n),
@@ -444,22 +446,22 @@ case class EditDistanceSimilarityJoin(
           val length = Math.ceil(l / (U + 1) + 0.001).toInt
           val seg = sss.slice(point, point + length)
           point = point + length
-          ss += Tuple2(({if (seg.length == 0) "" else seg.reduce(_ + " " + _)}, i, l, 0).hashCode(),
+          ss += Tuple2(( {
+            if (seg.length == 0) "" else seg.reduce(_ + " " + _)
+          }, i, l, 0).hashCode(),
             ValueInfo(s, false, Array[Boolean]()))
         }
       }
       ss.toArray
-    }// (substring, i, rlength)
+    } // (substring, i, rlength)
 
     def Lij(l: Int, i: Int): Int = {
       val U = threshold
       val K = (l - Math.floor(l / (U + 1)) * (U + 1)).toInt
-      if (i <= (U + 1 - K))
-      {
+      if (i <= (U + 1 - K)) {
         return Math.floor(l / (U + 1)).toInt
       }
-      else
-      {
+      else {
         return (Math.ceil(l / (U + 1)) + 0.001).toInt
       }
     }
@@ -521,27 +523,27 @@ case class EditDistanceSimilarityJoin(
       result.toArray
     }
 
-    def consRecordMap (ss: Array[String]) : Map[String, Int] = {
+    def consRecordMap(ss: Array[String]): Map[String, Int] = {
       var count = 0
       var tempMap = Map[String, Int]()
-      for (i <- 0 until ss.size){
+      for (i <- 0 until ss.size) {
         tempMap += (ss(i) -> count)
         count += 1
       }
       tempMap
     }
 
-    def consRecordInverMap (ss: Array[String]) : Map[Int, String] = {
+    def consRecordInverMap(ss: Array[String]): Map[Int, String] = {
       var count = 0
       var tempMap = Map[Int, String]()
-      for (i <- 0 until ss.size){
+      for (i <- 0 until ss.size) {
         tempMap += (count -> ss(i))
         count += 1
       }
       tempMap
     }
 
-    def sortForTwo (a: Int, b: Int): Tuple2[Int, Int] = {
+    def sortForTwo(a: Int, b: Int): Tuple2[Int, Int] = {
       if (a > b) {
         Tuple2(b, a)
       } else {
@@ -549,34 +551,34 @@ case class EditDistanceSimilarityJoin(
       }
     }
 
-    def EDdistance (a: String, b: String) : Int = {
+    def EDdistance(a: String, b: String): Int = {
       val str1 = a.split(" ")
       val str2 = b.split(" ")
       val lenStr1 = str1.length
       val lenStr2 = str2.length
       val edit = Array.ofDim[Int](lenStr1, lenStr2)
-      for(i <- 0 until lenStr1){
+      for (i <- 0 until lenStr1) {
         edit(i)(0) = i
       }
-      for(j <- 0 until lenStr2){
+      for (j <- 0 until lenStr2) {
         edit(0)(j) = j
       }
 
-      for(i <- 1 until lenStr1) {
-        for(j <- 1 until lenStr2) {
-          edit(i)(j) = Math.min( edit(i - 1)(j) + 1, edit(i)(j - 1) + 1 )
+      for (i <- 1 until lenStr1) {
+        for (j <- 1 until lenStr2) {
+          edit(i)(j) = Math.min(edit(i - 1)(j) + 1, edit(i)(j - 1) + 1)
           if (str1(i - 1) == str2(j - 1)) {
-            edit(i)(j) = Math.min( edit(i)(j), edit(i - 1)(j - 1) )
+            edit(i)(j) = Math.min(edit(i)(j), edit(i - 1)(j - 1))
           } else {
-            edit(i)(j) = Math.min( edit(i)(j), edit(i - 1)(j - 1) + 1 )
+            edit(i)(j) = Math.min(edit(i)(j), edit(i - 1)(j - 1) + 1)
           }
         }
       }
-      return edit(lenStr1-1)(lenStr2-1)
+      return edit(lenStr1 - 1)(lenStr2 - 1)
     }
 
-    def calculateAllL (min: Int,
-                       max: Int): Map[(Int, Int), Int] = {
+    def calculateAllL(min: Int,
+                      max: Int): Map[(Int, Int), Int] = {
       val result = Map[(Int, Int), Int]()
       for (l <- min until max + 1) {
         for (i <- 1 until threshold + 2) {
@@ -586,9 +588,9 @@ case class EditDistanceSimilarityJoin(
       result
     }
 
-    def calculateAllP (min: Int,
-                       max: Int,
-                       L: scala.collection.Map[(Int, Int), Int]): Map[(Int, Int), Int] = {
+    def calculateAllP(min: Int,
+                      max: Int,
+                      L: scala.collection.Map[(Int, Int), Int]): Map[(Int, Int), Int] = {
       val result = Map[(Int, Int), Int]()
       for (l <- min until max + 1) {
         for (i <- 1 until threshold + 2) {
@@ -633,8 +635,7 @@ case class EditDistanceSimilarityJoin(
       }
     }
 
-    val left_rdd = left.execute().map(row =>
-    {
+    val left_rdd = left.execute().map(row => {
       try {
         row.getString(0)
       } catch {
@@ -643,8 +644,7 @@ case class EditDistanceSimilarityJoin(
       }
     }).filter(x => (x.length > 0))
 
-    val right_rdd = right.execute().map(row =>
-    {
+    val right_rdd = right.execute().map(row => {
       try {
         row.getString(0)
       } catch {
@@ -725,12 +725,13 @@ case class EditDistanceSimilarityJoin(
         val index = rightIter.next
         logInfo(s"index data length: " + index._2.length.toString)
         leftIter
-          .flatMap (row => findSimilarity(row, index, num_partitions))
+          .flatMap(row => findSimilarity(row, index, num_partitions))
           .map(x => InternalRow.
             fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(x._1.toString),
               org.apache.spark.unsafe.types.UTF8String.fromString(x._2.toString))))
           .toArray.iterator
       }
     }
+  }
 }
 
