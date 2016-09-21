@@ -407,18 +407,6 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
           distribute(addToDistributeWhen1(chooseid)._1) += addToDistributeWhen1(chooseid)._2.toLong
         }
       }
-      //
-      //    println("distribute:")
-      //    for (i <- 0 until numPartition) {
-      //      print(distribute(i) + ",")
-      //    }
-      //    println("")
-      //
-      //    println("V:")
-      //    for (i <- V) {
-      //      print(i + ",")
-      //    }
-      //    println("")
 
       V
     }
@@ -447,12 +435,6 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
       for (lrange <- range) {
         val l = lrange._1
         val isExtend = {
-          //          if (l == range(range.length - 1)._1) {
-          //            false
-          //          }
-          //          else {
-          //            true
-          //          }
           true
         }
 
@@ -467,7 +449,6 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
           }
         }.toArray
 
-        //      println(ss1)
         val V = calculateVsl(s, l, indexNum, substring, H, minimum, threshold, alpha, partitionNum, topDegree)
 
         var V_Info = ""
@@ -800,12 +781,11 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
       average.value.toString +
       count.value.toString)
     val record = right_rdd
-      // .filter(x => {val l = x.split(" "); l.length < 500 && l(0).length > 0})*/
       .map(x => sortByValue(x))
       .distinct
       .persist(StorageLevel.DISK_ONLY)
     // .map(x => mapTokenToId(tokenMapId.value, x))
-    val multiGroup = sparkContext.broadcast(multigroup(minimum.value, maximum.value, threshold, alpha));
+    val multiGroup = sparkContext.broadcast(multigroup(minimum.value, maximum.value, threshold, alpha))
     val recordidMapSubstring = record
       .map(x => {
         logInfo(s"" + x)
@@ -873,7 +853,6 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
       index_rdd.partitionBy(new SimilarityHashPartitioner(num_partitions))
 
     val index_rdd_indexed = index_rdd_partitioned
-      .filter(x => !x._2._4)
       .mapPartitions(iter => {
         val data = iter.toArray
         val index = Map[Int, List[Int]]()

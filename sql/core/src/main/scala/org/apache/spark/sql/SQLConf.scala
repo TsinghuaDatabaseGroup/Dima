@@ -471,6 +471,8 @@ private[spark] object SQLConf {
     defaultValue = Some("2"))
   val SIMILARITY_JACCARD_THRESHOLD = stringConf("spark.sql.joins.similarityJaccardThreshold",
     defaultValue = Some("0.8"))
+  val SIMILARITY_EDIT_DISTANCE_THRESHOLD = stringConf("spark.sql.joins.similarityEditDistanceThreshold",
+    defaultValue = Some("3"))
   val SIMILARITY_MULTIGROUP_THRESHOLD = stringConf("spark.sql.joins.similarityMultigroupThreshold",
     defaultValue = Some("0.95"))
   val SIMILARITY_BALANCE_TOPDEGREE = stringConf("spark.sql.joins.similarityBalanceTopdegree",
@@ -638,6 +640,8 @@ private[sql] class SQLConf extends Serializable with CatalystConf {
   private[spark] def similarityJoinMethod: String = getConf(SIMILARITY_JOIN_METHOD)
 
   private[spark] def numSimilarityPartitions: String = getConf(NUM_SIMILARITY_PARTITIONS)
+
+  private[spark] def similarityEditDistanceThreshold: String = getConf(SIMILARITY_EDIT_DISTANCE_THRESHOLD)
 
   private[spark] def similarityJaccardThreshold: String = getConf(SIMILARITY_JACCARD_THRESHOLD)
 
