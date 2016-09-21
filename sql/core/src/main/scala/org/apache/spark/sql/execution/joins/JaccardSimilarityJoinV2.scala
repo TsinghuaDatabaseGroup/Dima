@@ -449,7 +449,16 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
           }
         }.toArray
 
-        val V = calculateVsl(s, l, indexNum, substring, H, minimum, threshold, alpha, partitionNum, topDegree)
+        val V = calculateVsl(s,
+          l,
+          indexNum,
+          substring,
+          H,
+          minimum,
+          threshold,
+          alpha,
+          partitionNum,
+          topDegree)
 
         var V_Info = ""
         for (ii <- V) {

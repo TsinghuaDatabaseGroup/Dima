@@ -148,229 +148,209 @@ case class EditDistanceSimilarityJoin(
       AA
     }
 
-    def calculateVsl(
-                      s: Int,
-                      l: Int,
-                      indexNum: scala.collection.Map[(Int, Int), Int],
-                      substring: Array[String],
-                      H: Int,
-                      minimum: Int,
-                      threshold: Double,
-                      alpha: Double,
-                      numPartition: Int,
-                      topDegree: Int
-                    ): Array[Int] = {
+//    def calculateVsl(
+//                      s: Int,
+//                      l: Int,
+//                      indexNum: scala.collection.Map[(Int, Int), Int],
+//                      substring: Array[String],
+//                      H: Int,
+//                      minimum: Int,
+//                      threshold: Double,
+//                      alpha: Double,
+//                      numPartition: Int,
+//                      topDegree: Int
+//                    ): Array[Int] = {
+//
+//      val C0 = {
+//        for (i <- 1 until H + 1) yield {
+//          0
+//        }
+//      }.toArray
+//      val C1 = {
+//        for (i <- 1 until H + 1) yield {
+//          try {
+//            indexNum(((substring(i - 1), i, l).hashCode(), 0))
+//          } catch {
+//            case e: NoSuchElementException =>
+//              0
+//          }
+//        }
+//      }.toArray
+//      val C2 = {
+//        for (i <- 1 until H + 1) yield {
+//          try {
+//            C1(i - 1) +
+//              indexNum(((substring(i - 1), i, l).hashCode(), 1)) +
+//              inverseDel(substring(i - 1), indexNum, i, l, minimum)
+//          } catch {
+//            case e: NoSuchElementException =>
+//              C1(i - 1) + inverseDel(substring(i - 1), indexNum, i, l, minimum)
+//          }
+//        }
+//      }.toArray
+//
+//      val addToDistributeWhen1 = {
+//        for (i <- 1 until H + 1) yield {
+//          val hash = (substring(i - 1), i, l).hashCode()
+//          val code = (hash % numPartition)
+//          val partition = {
+//            if (code < 0) {
+//              code + numPartition
+//            } else {
+//              code
+//            }
+//          }
+//          try {
+//            (partition, indexNum((hash, 0)))
+//          } catch {
+//            case e: NoSuchElementException =>
+//              (partition, 0)
+//          }
+//        }
+//      }.toArray
+//
+//      val addToDistributeWhen2 = {
+//        for (i <- 1 until H + 1) yield {
+//          val hash = (substring(i - 1), i, l).hashCode()
+//          val code = (hash % numPartition)
+//          val partition = {
+//            if (code < 0) {
+//              code + numPartition
+//            } else {
+//              code
+//            }
+//          }
+//          val x = addToMapForInverseDel(substring(i - 1), indexNum, i, l, minimum, numPartition)
+//          if (indexNum.contains((hash, 1)) && x != null && x.length > 0) {
+//            Array.concat(Array((partition, indexNum((hash, 1)))), x)
+//          } else if (indexNum.contains((hash, 1))) {
+//            Array((partition, indexNum((hash, 1))))
+//          } else if (x != null && x.length > 0) {
+//            x
+//          } else {
+//            Array((partition, 0))
+//          }
+//        }
+//      }.toArray
+//
+//      val deata_distribute0 = {
+//        // 只考虑有变化的reducer的负载
+//        for (i <- 0 until H) yield {
+//          // 分配到1之后情况比较单一,只有inverseindex 和 inversequery匹配这一种情况,只会对一个reducer产生影响
+//          val max = {
+//            if (addToDistributeWhen1(i)._2 > 0) {
+//              (distribute(addToDistributeWhen1(i)._1) +
+//                addToDistributeWhen1(i)._2.toLong)*Math.pow(2, topDegree-1).toLong
+//            } else {
+//              0.toLong
+//            }
+//          }
+//          max
+//        }
+//      }.toArray
+//
+//      val deata_distribute1 = {
+//        // 分配到2
+//        for (i <- 0 until H) yield {
+//          val dis = distribute.slice(0, numPartition).clone()
+//          val change = ArrayBuffer[Int]()
+//          for (j <- addToDistributeWhen2(i)) {
+//            dis(j._1) += j._2.toLong
+//            if (j._2 > 0) {
+//              change += j._1
+//            }
+//          }
+//          var total = 0.toLong
+//          for (i <- 0 until topDegree) {
+//            var max = 0.toLong
+//            var maxPos = -1
+//            var pos = 0
+//            for (c <- change) {
+//              if (dis(c) >= max) {
+//                max = dis(c)
+//                maxPos = pos
+//              }
+//              pos += 1
+//            }
+//            if (maxPos >= 0) {
+//              change.remove(maxPos)
+//              total += Math.pow(2, topDegree - i - 1).toLong * max
+//            }
+//          }
+//          total
+//        }
+//      }.toArray
+//
+//      val deata0 = {
+//        for (i <- 0 until H) yield {
+//          Tuple2(deata_distribute0(i), C1(i) - C0(i))
+//          //        C1(i) - C0(i)
+//        }
+//      }.toArray
+//
+//      val deata1 = {
+//        for (i <- 0 until H) yield {
+//          Tuple2(deata_distribute1(i), C2(i) - C1(i))
+//          //        C2(i) - C1(i)
+//        }
+//      }.toArray
+//
+//      val Hls = CalculateH(Math.floor(l / alpha + 0.0001).toInt, s, threshold)
+//
+//      val V = {
+//        for (i <- 1 until H + 1) yield {
+//          0
+//        }
+//      }.toArray
+//
+//      var M = buildMinHeap(deata0.zipWithIndex.map(x => (0, x._1, x._2)))
+//
+//      for (j <- 1 until Hls + 1) {
+//        val MM = heapExtractMin(M)
+//        M = MM._2
+//        val pair = MM._1
+//        V(pair._3) += 1
+//        if (V(pair._3) == 1) {
+//          M = minHeapInsert(M, Tuple3(1, deata1(pair._3), pair._3))
+//        }
+//      }
+//
+//      for (chooseid <- 0 until H) {
+//        if (V(chooseid) == 1) {
+//          distribute(addToDistributeWhen1(chooseid)._1) += addToDistributeWhen1(chooseid)._2.toLong
+//        } else if (V(chooseid) == 2) {
+//          for (j <- addToDistributeWhen2(chooseid)) {
+//            distribute(j._1) += j._2.toLong
+//          }
+//          distribute(addToDistributeWhen1(chooseid)._1) += addToDistributeWhen1(chooseid)._2.toLong
+//        }
+//      }
+//
+//      V
+//    }
 
-      val C0 = {
-        for (i <- 1 until H + 1) yield {
-          0
-        }
-      }.toArray
-      val C1 = {
-        for (i <- 1 until H + 1) yield {
-          try {
-            indexNum(((substring(i - 1), i, l).hashCode(), 0))
-          } catch {
-            case e: NoSuchElementException =>
-              0
-          }
-        }
-      }.toArray
-      val C2 = {
-        for (i <- 1 until H + 1) yield {
-          try {
-            C1(i - 1) +
-              indexNum(((substring(i - 1), i, l).hashCode(), 1)) +
-              inverseDel(substring(i - 1), indexNum, i, l, minimum)
-          } catch {
-            case e: NoSuchElementException =>
-              C1(i - 1) + inverseDel(substring(i - 1), indexNum, i, l, minimum)
-          }
-        }
-      }.toArray
-
-      val addToDistributeWhen1 = {
-        for (i <- 1 until H + 1) yield {
-          val hash = (substring(i - 1), i, l).hashCode()
-          val code = (hash % numPartition)
-          val partition = {
-            if (code < 0) {
-              code + numPartition
-            } else {
-              code
-            }
-          }
-          try {
-            (partition, indexNum((hash, 0)))
-          } catch {
-            case e: NoSuchElementException =>
-              (partition, 0)
-          }
-        }
-      }.toArray
-
-      val addToDistributeWhen2 = {
-        for (i <- 1 until H + 1) yield {
-          val hash = (substring(i - 1), i, l).hashCode()
-          val code = (hash % numPartition)
-          val partition = {
-            if (code < 0) {
-              code + numPartition
-            } else {
-              code
-            }
-          }
-          val x = addToMapForInverseDel(substring(i - 1), indexNum, i, l, minimum, numPartition)
-          if (indexNum.contains((hash, 1)) && x != null && x.length > 0) {
-            Array.concat(Array((partition, indexNum((hash, 1)))), x)
-          } else if (indexNum.contains((hash, 1))) {
-            Array((partition, indexNum((hash, 1))))
-          } else if (x != null && x.length > 0) {
-            x
-          } else {
-            Array((partition, 0))
-          }
-        }
-      }.toArray
-
-      val deata_distribute0 = {
-        // 只考虑有变化的reducer的负载
-        for (i <- 0 until H) yield {
-          // 分配到1之后情况比较单一,只有inverseindex 和 inversequery匹配这一种情况,只会对一个reducer产生影响
-          val max = {
-            if (addToDistributeWhen1(i)._2 > 0) {
-              (distribute(addToDistributeWhen1(i)._1) +
-                addToDistributeWhen1(i)._2.toLong)*Math.pow(2, topDegree-1).toLong
-            } else {
-              0.toLong
-            }
-          }
-          max
-        }
-      }.toArray
-
-      val deata_distribute1 = {
-        // 分配到2
-        for (i <- 0 until H) yield {
-          val dis = distribute.slice(0, numPartition).clone()
-          val change = ArrayBuffer[Int]()
-          for (j <- addToDistributeWhen2(i)) {
-            dis(j._1) += j._2.toLong
-            if (j._2 > 0) {
-              change += j._1
-            }
-          }
-          var total = 0.toLong
-          for (i <- 0 until topDegree) {
-            var max = 0.toLong
-            var maxPos = -1
-            var pos = 0
-            for (c <- change) {
-              if (dis(c) >= max) {
-                max = dis(c)
-                maxPos = pos
-              }
-              pos += 1
-            }
-            if (maxPos >= 0) {
-              change.remove(maxPos)
-              total += Math.pow(2, topDegree - i - 1).toLong * max
-            }
-          }
-          total
-        }
-      }.toArray
-
-      val deata0 = {
-        for (i <- 0 until H) yield {
-          Tuple2(deata_distribute0(i), C1(i) - C0(i))
-          //        C1(i) - C0(i)
-        }
-      }.toArray
-
-      val deata1 = {
-        for (i <- 0 until H) yield {
-          Tuple2(deata_distribute1(i), C2(i) - C1(i))
-          //        C2(i) - C1(i)
-        }
-      }.toArray
-
-      val Hls = CalculateH(Math.floor(l / alpha + 0.0001).toInt, s, threshold)
-
-      val V = {
-        for (i <- 1 until H + 1) yield {
-          0
-        }
-      }.toArray
-
-      var M = buildMinHeap(deata0.zipWithIndex.map(x => (0, x._1, x._2)))
-
-      for (j <- 1 until Hls + 1) {
-        val MM = heapExtractMin(M)
-        M = MM._2
-        val pair = MM._1
-        V(pair._3) += 1
-        if (V(pair._3) == 1) {
-          M = minHeapInsert(M, Tuple3(1, deata1(pair._3), pair._3))
-        }
-      }
-
-      for (chooseid <- 0 until H) {
-        if (V(chooseid) == 1) {
-          distribute(addToDistributeWhen1(chooseid)._1) += addToDistributeWhen1(chooseid)._2.toLong
-        } else if (V(chooseid) == 2) {
-          for (j <- addToDistributeWhen2(chooseid)) {
-            distribute(j._1) += j._2.toLong
-          }
-          distribute(addToDistributeWhen1(chooseid)._1) += addToDistributeWhen1(chooseid)._2.toLong
-        }
-      }
-      //
-      //    println("distribute:")
-      //    for (i <- 0 until numPartition) {
-      //      print(distribute(i) + ",")
-      //    }
-      //    println("")
-      //
-      //    println("V:")
-      //    for (i <- V) {
-      //      print(i + ",")
-      //    }
-      //    println("")
-
-      V
-    }
-
-    def part(s: String): Array[Int] =
-    {
+    def part(s: String): Array[Int] = {
       var ss = ArrayBuffer[Int]()
       val U: Int = threshold
       val sss = s.split(" ")
       val l = sss.length
       val K: Int = (l - Math.floor(l / (U + 1)) * (U + 1)).toInt
       var point: Int = 0
-      val segment = {
-        for (i <- 1 until U + 2) yield {
-          if (i <= (U + 1 - K)) {
-            val length = Math.floor(l / (U + 1)).toInt
-            val seg = sss.slice(point, point + length)
-            point = point + length
-            (seg, i, l)
-          }
-          else {
-            val length = Math.ceil(l / (U + 1) + 0.001).toInt
-            val seg = sss.slice(point, point + length)
-            point = point + length
-            (seg, i, l)
-          }
+      for (i <- 1 until U + 2) {
+        if (i <= (U + 1 - K)) {
+          val length = Math.floor(l / (U + 1)).toInt
+          val seg = sss.slice(point, point + length)
+          point = point + length
+          ss += ({if (seg.length == 0) "" else seg.reduce(_ + " " + _)}, i, l).hashCode()
         }
-      }.toArray
-        .map(x => {
-          if (x._1.length == 0) ("", x._2, x._3).hashCode()
-          else if (x._1.length == 1) (x._1(0), x._2, x._3).hashCode()
-          else (x._1.reduce(_ + " " + _), x._2, x._3).hashCode()
-        })
-      segment
+        else {
+          val length = Math.ceil(l / (U + 1) + 0.001).toInt
+          val seg = sss.slice(point, point + length)
+          point = point + length
+          ss += ({if (seg.length == 0) "" else seg.reduce(_ + " " + _)}, i, l).hashCode()
+        }
+      }
+      ss.toArray
     }// (substring, i, rlength)
 
     def Lij(l: Int, i: Int): Int = {
@@ -396,8 +376,9 @@ case class EditDistanceSimilarityJoin(
 
     def parts(s: String,
               L: Map[(Int, Int), Int],
-              P: Map[(Int, Int), Int]): Array[Int] =
-    {
+              P: Map[(Int, Int), Int]): Array[Int] = {
+      val result = ArrayBuffer[Int]()
+
       val sss = s.split(" ")
       val slength = sss.length
       val lu = slength
@@ -405,24 +386,24 @@ case class EditDistanceSimilarityJoin(
       val U = threshold
       val partLength_o = Math.floor(lo / (U + 1)).toInt
       val partLength_u = (Math.ceil(lu / (U + 1)) + 0.0001).toInt
+      for (l <- lo until lu + 1) {
+        for (i <- 1 until U + 2) {
+          for (x <- Math.max(P(i, l) - (i - 1), P(i, l) - (l - slength + (U + 1 - i)))
+            until Math.min(P(i, l) + slength - l + U + 1 - i, P(i, l) + i - 1) + 1) {
 
-      val segment = {
-        for (l <- lo until lu + 1) yield {
-          for (i <- 1 until U + 2) yield {
-            for (x <- Math.max(P(i, l) - (i - 1), P(i, l) - (l - slength + (U + 1 - i)))
-              until Math.min(P(i, l) + slength - l + U + 1 - i, P(i, l) + i - 1) + 1) yield {
-              // println((x - 1, x - 2 + Lij(l, i), i, l,Lij(l,i)))
-              Tuple3(sss.slice(x - 1, x - 1 + L(l, i)), i, l)
+            val seg = {
+              val subset = sss.slice(x - 1, x - 1 + L(l, i))
+              if (subset.length == 0) {
+                ""
+              } else {
+                subset.reduce(_ + " " + _)
+              }
             }
-          }.toArray
-            .map(x => {
-              if (x._1.length == 0) ("", x._2, x._3).hashCode()
-              else if (x._1.length == 1) (x._1(0), x._2, x._3).hashCode()
-              else (x._1.reduce(_ + " " + _), x._2, x._3).hashCode()
-            })
-        }.toArray.flatMap(x => x)
-      }.toArray.flatMap(x => x)
-      segment
+            result += (seg, i, l).hashCode()
+          }
+        }
+      }
+      result.toArray
     }
 
     def consRecordMap (ss: Array[String]) : Map[String, Int] = {
