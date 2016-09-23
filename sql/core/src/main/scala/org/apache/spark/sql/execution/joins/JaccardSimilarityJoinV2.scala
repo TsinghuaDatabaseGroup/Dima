@@ -469,7 +469,7 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
         for (i <- 1 until H + 1) {
           val p = ss.filter(x => x.hashCode % H + 1 == i)
           records += Tuple2(p.map(x => x.hashCode),
-            if (V(i-1)==0) Array() else if (V(i-1)==1) Array(false) else Array(true)
+            if (V(i - 1) == 0) Array() else if (V(i - 1) == 1) Array(false) else Array(true)
           )
         }
 
