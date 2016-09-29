@@ -25,6 +25,7 @@ import org.apache.spark.sql.partitioner.{SimilarityHashPartitioner, SimilarityHa
 import org.apache.spark.storage.StorageLevel
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.Map
+import org.apache.spark.sql.execution.SimilarityRDD
 
 case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
                              right_keys: Seq[Expression],
@@ -851,7 +852,7 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
     // .union(index_rdd.map(s => ((s._1._1, s._1._5), (s._2, s._1._2, s._1._3, s._1._4))))
 
     val index_rdd_partitioned =
-      index_rdd.partitionBy(new SimilarityHashPartitioner(num_partitions))
+      new SimilarityRDD(index_rdd, true).partitionBy(new SimilarityHashPartitioner(num_partitions))
 
     val index_rdd_indexed = index_rdd_partitioned
       .mapPartitions(iter => {
@@ -871,7 +872,7 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
       }).persist(StorageLevel.DISK_ONLY)
 
     val query_rdd_partitioned =
-      query_rdd
+      new SimilarityRDD(query_rdd, true)
         .partitionBy(new SimilarityHashPartitioner(num_partitions))
         .persist(StorageLevel.DISK_ONLY)
 

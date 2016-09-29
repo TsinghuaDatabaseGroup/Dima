@@ -659,8 +659,7 @@ case class JaccardSelfSimilarityJoinV2(
         if (!query._2 && query._3.length > 0 && query._3(0)) {
           // query from inverse with value 2
           if (query._1._1 != index._1._1) {
-//            verify(query._1._2, index._1._2, threshold, pos)
-            true
+            verify(query._1._2, index._1._2, threshold, pos)
           } else {
             false
           }
@@ -672,32 +671,28 @@ case class JaccardSelfSimilarityJoinV2(
         if (!query._2 && !query._4 && query._3.length > 0) {
           // query from inverse index with value 2 or 1
           if (query._1._1 < index._1._1) {
-//            verify(query._1._2, index._1._2, threshold, pos)
-            true
+            verify(query._1._2, index._1._2, threshold, pos)
           } else {
             false
           }
         } else if (!query._2 && query._4 && query._3.length > 0) {
           // query from inverse query with value 2 or 1
           if (query._1._1 != index._1._1) {
-//            verify(query._1._2, index._1._2, threshold, pos)
-            true
+            verify(query._1._2, index._1._2, threshold, pos)
           } else {
             false
           }
         } else if (query._2 && !query._4 && query._3.length > 0 && query._3(0)) {
           // query from deletion index with value 2
           if (query._1._1 < index._1._1) {
-//            verify(query._1._2, index._1._2, threshold, pos)
-            true
+            verify(query._1._2, index._1._2, threshold, pos)
           } else {
             false
           }
         } else if (query._2 && query._4 && query._3.length > 0 && query._3(0)) {
           // query from deletion query with value 2
           if (query._1._1 != index._1._1) {
-//            verify(query._1._2, index._1._2, threshold, pos)
-            true
+            verify(query._1._2, index._1._2, threshold, pos)
           } else {
             false
           }
@@ -789,13 +784,17 @@ case class JaccardSelfSimilarityJoinV2(
       .map(x => (x._2._1, (x._1, x._2._2, x._2._3, x._2._4, x._2._5)))
       .persist(StorageLevel.DISK_ONLY)
 
-    val query_rdd_partitioned = query_rdd
+    val rdd_partitioned = query_rdd
       .partitionBy(new SimilarityHashPartitioner(num_partitions))
       .persist(StorageLevel.DISK_ONLY)
 
     // 全局索引 就是hash
     // 现在开始为每一个partition建索引
-    val index_rdd_indexed = query_rdd_partitioned
+    val query_rdd_partitioned = rdd_partitioned
+      .filter(x => (x._2._3.length > 0 && (x._2._3(0) || (!x._2._3(0) && !x._2._2))))
+      .persist(StorageLevel.DISK_ONLY)
+
+    val index_rdd_indexed = rdd_partitioned
       .filter(x => !x._2._4)
       .mapPartitions(iter => {
         val data = iter.toArray
@@ -813,14 +812,16 @@ case class JaccardSelfSimilarityJoinV2(
         Array((index, data.map(x => x._2))).iterator
       }).persist()
 
+    rdd_partitioned.unpersist()
+
     // construct index ahead of time
     query_rdd_partitioned.count
     index_rdd_indexed.count
 
-    query_rdd_partitioned.zipPartitions(index_rdd_indexed) {
+    query_rdd_partitioned.zipPartitions(index_rdd_indexed, true) {
         (leftIter, rightIter) => {
           // logInfo(leftIter.length.toString())
-          var countNum = 0
+          val ans = mutable.ListBuffer[InternalRow]()
           val index = rightIter.next
           logInfo(s"index data length: " + index._2.length.toString)
           val query_data = leftIter.toArray
@@ -833,25 +834,18 @@ case class JaccardSelfSimilarityJoinV2(
               for (i <- index._1(q._1)) {
                 if (compareSimilarity(q._2, index._2(i))) {
                   logInfo(s"success")
-                  countNum += 1
-//                  ans += InternalRow.
-//                    fromSeq(Seq(
-//                      org.apache.spark.unsafe.types.UTF8String.fromString(q._2._1._1.toString),
-//                      org.apache.spark.unsafe.types.UTF8String.fromString(index._2(i)._1._1.toString)
-//                    ))
+                  ans += InternalRow.
+                    fromSeq(Seq(
+                      org.apache.spark.unsafe.types.UTF8String.fromString(q._2._1._1.toString),
+                      org.apache.spark.unsafe.types.UTF8String.fromString(index._2(i)._1._1.toString)
+                    ))
                 } else {
                   logInfo(s"failed")
                 }
               }
             }
           }
-          val c = mutable.ListBuffer[InternalRow]()
-          c += InternalRow.
-            fromSeq(Seq(
-              org.apache.spark.unsafe.types.UTF8String.fromString(countNum.toString),
-              org.apache.spark.unsafe.types.UTF8String.fromString("verify number")
-            ))
-          c.iterator
+          ans.iterator
         }
     }
   }

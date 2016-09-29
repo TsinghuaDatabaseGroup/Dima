@@ -24,6 +24,7 @@ import org.apache.spark.sql.execution.{BinaryNode, SparkPlan}
 import org.apache.spark.sql.partitioner.SimilarityHashPartitioner
 import org.apache.spark.storage.StorageLevel
 import scala.collection.mutable.{ArrayBuffer, Map}
+import org.apache.spark.sql.execution.SimilarityRDD
 
 /**
   * Created by sunji on 16/9/2.
@@ -692,7 +693,7 @@ case class EditDistanceSimilarityJoin(
         .reduceByKey(_ + _).collectAsMap()
     )
 
-    val index_partitioned_rdd = index_rdd
+    val index_partitioned_rdd = new SimilarityRDD(index_rdd, true)
       .partitionBy(new SimilarityHashPartitioner(num_partitions))
 
     val index_indexed_rdd = index_partitioned_rdd
@@ -710,15 +711,16 @@ case class EditDistanceSimilarityJoin(
         }
         logInfo(s"index length: " + index.size.toString)
         Array((index, data.map(x => x._2))).iterator
-      }).persist(StorageLevel.DISK_ONLY)
+      }).persist()
 
     val query_rdd = record
       .map(x => (x.split(" ").length, x))
       .flatMap(x => parts(x._2, indexNum.value, partitionL.value, partitionP.value))
       .map(x => (x._1, x._2))
 
-    val query_partitioned_rdd = query_rdd
+    val query_partitioned_rdd = new SimilarityRDD(query_rdd, true)
       .partitionBy(new SimilarityHashPartitioner(num_partitions))
+      .persist(StorageLevel.DISK_ONLY)
 
     query_partitioned_rdd.zipPartitions(index_indexed_rdd) {
       (leftIter, rightIter) => {
