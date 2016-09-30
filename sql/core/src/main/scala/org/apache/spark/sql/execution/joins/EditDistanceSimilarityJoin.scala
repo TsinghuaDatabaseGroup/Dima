@@ -693,8 +693,9 @@ case class EditDistanceSimilarityJoin(
         .reduceByKey(_ + _).collectAsMap()
     )
 
-    val index_partitioned_rdd = new SimilarityRDD(index_rdd, true)
-      .partitionBy(new SimilarityHashPartitioner(num_partitions))
+    val index_partitioned_rdd = new SimilarityRDD(index_rdd.partitionBy(
+      new SimilarityHashPartitioner(num_partitions)), true
+    )
 
     val index_indexed_rdd = index_partitioned_rdd
       .mapPartitions(iter => {
@@ -718,8 +719,10 @@ case class EditDistanceSimilarityJoin(
       .flatMap(x => parts(x._2, indexNum.value, partitionL.value, partitionP.value))
       .map(x => (x._1, x._2))
 
-    val query_partitioned_rdd = new SimilarityRDD(query_rdd, true)
-      .partitionBy(new SimilarityHashPartitioner(num_partitions))
+    val query_partitioned_rdd = new SimilarityRDD(
+      query_rdd.partitionBy(
+      new SimilarityHashPartitioner(num_partitions)), true
+    )
       .persist(StorageLevel.DISK_ONLY)
 
     query_partitioned_rdd.zipPartitions(index_indexed_rdd) {
