@@ -76,16 +76,31 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
     def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
       case ExtractSimilarityJoinKeys(leftKeys, rightKeys, r, SimilarityJoin, left, right) =>
         sqlContext.conf.similarityJoinMethod match {
-          case "JaccardSimilarityJoin" =>
+          case "Jaccard" =>
             logInfo(s"JaccardSimilarityJoin")
-            JaccardSimilarityJoinV2(leftKeys, rightKeys, r, planLater(left), planLater(right)) :: Nil
+            JaccardSimilarityJoinV2(leftKeys,
+              rightKeys,
+              r,
+              planLater(left),
+              planLater(right)) :: Nil
+          case "EditDistance" =>
+            logInfo(s"EditDistanceSimilarityJoin")
+            EditDistanceSimilarityJoin(leftKeys,
+              rightKeys,
+              r,
+              planLater(left),
+              planLater(right)) :: Nil
           case _ =>
             logInfo(s"SimilarityJoinExtractor: JaccardSimilarityJoin")
-            JaccardSimilarityJoinV2(leftKeys, rightKeys, r, planLater(left), planLater(right)) :: Nil
+            JaccardSimilarityJoinV2(leftKeys,
+              rightKeys,
+              r,
+              planLater(left),
+              planLater(right)) :: Nil
         }
       case ExtractSelfSimilarityJoinKeys(r, SelfSimilarityJoin, left, right) =>
         sqlContext.conf.similarityJoinMethod match {
-          case "JaccardSelfSimilarityJoin" =>
+          case "Jaccard" =>
             logInfo(s"JaccardSelfSimilarityJoin")
             JaccardSelfSimilarityJoinV2(r, planLater(left), planLater(right)) :: Nil
           case _ =>
