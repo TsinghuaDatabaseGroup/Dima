@@ -852,7 +852,7 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
     // .union(index_rdd.map(s => ((s._1._1, s._1._5), (s._2, s._1._2, s._1._3, s._1._4))))
 
     val index_rdd_partitioned =
-      new SimilarityRDD(index_rdd, true).partitionBy(new SimilarityHashPartitioner(num_partitions))
+      new SimilarityRDD(index_rdd.partitionBy(new SimilarityHashPartitioner(num_partitions)), true)
 
     val index_rdd_indexed = index_rdd_partitioned
       .mapPartitions(iter => {
@@ -869,12 +869,14 @@ case class JaccardSimilarityJoinV2(left_keys: Seq[Expression],
         }
         logInfo(s"index length: " + index.size.toString)
         Array((index, data.map(x => x._2))).iterator
-      }).persist(StorageLevel.DISK_ONLY)
+      }).persist()
 
     val query_rdd_partitioned =
-      new SimilarityRDD(query_rdd, true)
-        .partitionBy(new SimilarityHashPartitioner(num_partitions))
+      new SimilarityRDD(query_rdd.partitionBy(new SimilarityHashPartitioner(num_partitions)), true)
         .persist(StorageLevel.DISK_ONLY)
+
+    query_rdd_partitioned.count
+    index_rdd_indexed.count
 
     query_rdd_partitioned.zipPartitions(index_rdd_indexed) {
       (leftIter, rightIter) => {
