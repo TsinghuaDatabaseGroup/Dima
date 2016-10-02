@@ -31,12 +31,6 @@ import org.apache.spark.sql.execution.SimilarityRDD
   * Created by sunji on 16/9/2.
   */
 
-case class ValueInfo(
-                      record: String,
-                      isDeletion: Boolean,
-                      value: Array[Boolean]
-                    ) extends Serializable
-
 case class EditDistanceSelfSimilarityJoin(
                                        l: Literal,
                                        left: SparkPlan,
