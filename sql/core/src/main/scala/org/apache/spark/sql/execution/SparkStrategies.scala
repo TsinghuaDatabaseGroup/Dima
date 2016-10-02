@@ -103,6 +103,9 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           case "Jaccard" =>
             logInfo(s"JaccardSelfSimilarityJoin")
             JaccardSelfSimilarityJoinV2(r, planLater(left), planLater(right)) :: Nil
+          case "EditDistance" =>
+            logInfo(s"EditDistanceSelfSimilarityJoin")
+            EditDistanceSelfSimilarityJoin(r, planLater(left), planLater(right)) :: Nil
           case _ =>
             logInfo(s"JaccardSelfSimilarityJoin")
             JaccardSelfSimilarityJoinV2(r, planLater(left), planLater(right)) :: Nil

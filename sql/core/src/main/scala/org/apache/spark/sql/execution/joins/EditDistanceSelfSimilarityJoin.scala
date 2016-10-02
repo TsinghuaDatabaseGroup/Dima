@@ -35,14 +35,12 @@ case class ValueInfo(
                       record: String,
                       isDeletion: Boolean,
                       value: Array[Boolean]
-                      ) extends Serializable
+                    ) extends Serializable
 
-case class EditDistanceSimilarityJoin(
-                                  left_keys: Seq[Expression],
-                                  right_keys: Seq[Expression],
-                                  l: Literal,
-                                  left: SparkPlan,
-                                  right: SparkPlan) extends BinaryNode {
+case class EditDistanceSelfSimilarityJoin(
+                                       l: Literal,
+                                       left: SparkPlan,
+                                       right: SparkPlan) extends BinaryNode {
   override def output: Seq[Attribute] = left.output ++ right.output
 
   final val num_partitions = sqlContext.conf.numSimilarityPartitions.toInt
@@ -508,7 +506,7 @@ case class EditDistanceSimilarityJoin(
 
       val sss = s.split(" ")
       val sLength = sss.length
-      val lu = sLength + threshold
+      val lu = sLength
       val lo = Math.max(sLength - threshold, threshold + 1)
       val U = threshold
       for (l <- lo until lu + 1) {
@@ -674,34 +672,17 @@ case class EditDistanceSimilarityJoin(
       }
     }).filter(x => (x.length > 0))
 
-    val right_rdd = right.execute().map(row => {
-      try {
-        row.getString(0)
-      } catch {
-        case e: NullPointerException => ""
-        case _ => ""
-      }
-    }).filter(x => (x.length > 0))
-
     val record = left_rdd
       .distinct
       .persist(StorageLevel.DISK_ONLY)
 
-    val indexLength = right_rdd
+    val indexLength = left_rdd
       .distinct
       .map(x => (x.split(" ").size))
       .persist(StorageLevel.DISK_ONLY)
 
-    val minLength_right = sparkContext.broadcast(Math.max(indexLength.min, threshold + 1))
-    val maxLength_right = sparkContext.broadcast(indexLength.max)
-    val minLength_left = sparkContext.broadcast(Math.max(
-      record.map(x => x.split(" ").size).min, threshold + 1)
-    )
-    val maxLength_left = sparkContext.broadcast(record.map(x => x.split(" ").size).max)
-
-    val minLength = sparkContext.broadcast(Math.min(minLength_left.value, minLength_right.value))
-    val maxLength = sparkContext.broadcast(Math.max(maxLength_left.value, maxLength_right.value))
-
+    val minLength = sparkContext.broadcast(Math.max(indexLength.min, threshold + 1))
+    val maxLength = sparkContext.broadcast(indexLength.max)
 
     logInfo(s"" + minLength.value.toString + " " +
       maxLength.value.toString)
@@ -711,7 +692,7 @@ case class EditDistanceSimilarityJoin(
     val partitionP = sparkContext
       .broadcast(calculateAllP(minLength.value, maxLength.value, partitionL.value))
 
-    val index_rdd = right_rdd
+    val index_rdd = left_rdd
       .distinct
       .map(x => (x.split(" ").length, x))
       .filter(x => x._1 > threshold)
@@ -758,7 +739,7 @@ case class EditDistanceSimilarityJoin(
 
     val query_partitioned_rdd = new SimilarityRDD(
       query_rdd.partitionBy(
-      new SimilarityHashPartitioner(num_partitions)), true
+        new SimilarityHashPartitioner(num_partitions)), true
     )
       .persist(StorageLevel.DISK_ONLY)
 
