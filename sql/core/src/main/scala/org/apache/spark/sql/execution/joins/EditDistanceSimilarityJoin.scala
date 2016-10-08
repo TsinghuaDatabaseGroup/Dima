@@ -48,6 +48,7 @@ case class EditDistanceSimilarityJoin(
   final val num_partitions = sqlContext.conf.numSimilarityPartitions.toInt
   final val threshold = sqlContext.conf.similarityEditDistanceThreshold.toInt
   final val topDegree = sqlContext.conf.similarityBalanceTopDegree.toInt
+  final val abandonNum = sqlContext.conf.similarityFrequencyAbandonNum.toInt
 
   override protected def doExecute(): RDD[InternalRow] = {
     logInfo(s"execute IndexSimilarityJoin")
@@ -209,7 +210,7 @@ case class EditDistanceSimilarityJoin(
           for (x <- lowerBound until upperBound + 1) {
             for (n <- 0 until length) {
               val subset = Array.concat(record.slice(x - 1, x - 1 + n),
-                record.slice(x - 1 + n, x - 1 + length))
+                record.slice(x - 1 + n + 1, x - 1 + length))
               val seg = {
                 if (subset.length == 0) {
                   ""
@@ -274,7 +275,7 @@ case class EditDistanceSimilarityJoin(
           for (x <- lowerBound until upperBound + 1) {
             for (n <- 0 until length) {
               val subset = Array.concat(record.slice(x - 1, x - 1 + n),
-                record.slice(x - 1 + n, x - 1 + length))
+                record.slice(x - 1 + n + 1, x - 1 + length))
               val seg = {
                 if (subset.length == 0) {
                   ""
@@ -727,7 +728,9 @@ case class EditDistanceSimilarityJoin(
           ((x._1, 0), 1)
         }
       })
-        .reduceByKey(_ + _).collectAsMap()
+        .reduceByKey(_ + _)
+        .filter(x => x._2 > abandonNum)
+        .collectAsMap()
     )
 
     val index_partitioned_rdd = new SimilarityRDD(index_rdd.partitionBy(

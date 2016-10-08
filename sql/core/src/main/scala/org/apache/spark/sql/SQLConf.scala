@@ -477,7 +477,8 @@ private[spark] object SQLConf {
     defaultValue = Some("0.95"))
   val SIMILARITY_BALANCE_TOPDEGREE = stringConf("spark.sql.joins.similarityBalanceTopdegree",
     defaultValue = Some("1"))
-
+  val SIMILARITY_FREQUENCY_ABANDON_NUM = stringConf("spark.sql.joins.similarityFrequencyAbandonNum",
+    defaultValue = Some("2"))
 
   // RTree Parameters
   val MAX_ENTRIES_PER_NODE = intConf("spark.sql.spatial.rtree.maxEntriesPerNode", defaultValue = Some(25))
@@ -649,6 +650,8 @@ private[sql] class SQLConf extends Serializable with CatalystConf {
     getConf(SIMILARITY_MULTIGROUP_THRESHOLD)
 
   private[spark] def similarityBalanceTopDegree: String = getConf(SIMILARITY_BALANCE_TOPDEGREE)
+
+  private[spark] def similarityFrequencyAbandonNum: String = getConf(SIMILARITY_FREQUENCY_ABANDON_NUM)
 
   /** ********************** SQLConf functionality methods ************ */
 

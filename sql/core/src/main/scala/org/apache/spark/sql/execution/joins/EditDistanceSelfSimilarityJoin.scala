@@ -40,6 +40,7 @@ case class EditDistanceSelfSimilarityJoin(
   final val num_partitions = sqlContext.conf.numSimilarityPartitions.toInt
   final val threshold = sqlContext.conf.similarityEditDistanceThreshold.toInt
   final val topDegree = sqlContext.conf.similarityBalanceTopDegree.toInt
+  final val abandonNum = sqlContext.conf.similarityFrequencyAbandonNum.toInt
 
   override protected def doExecute(): RDD[InternalRow] = {
     logInfo(s"execute IndexSimilarityJoin")
@@ -201,7 +202,7 @@ case class EditDistanceSelfSimilarityJoin(
           for (x <- lowerBound until upperBound + 1) {
             for (n <- 0 until length) {
               val subset = Array.concat(record.slice(x - 1, x - 1 + n),
-                record.slice(x - 1 + n, x - 1 + length))
+                record.slice(x - 1 + n + 1, x - 1 + length))
               val seg = {
                 if (subset.length == 0) {
                   ""
@@ -266,7 +267,7 @@ case class EditDistanceSelfSimilarityJoin(
           for (x <- lowerBound until upperBound + 1) {
             for (n <- 0 until length) {
               val subset = Array.concat(record.slice(x - 1, x - 1 + n),
-                record.slice(x - 1 + n, x - 1 + length))
+                record.slice(x - 1 + n + 1, x - 1 + length))
               val seg = {
                 if (subset.length == 0) {
                   ""
@@ -303,27 +304,33 @@ case class EditDistanceSelfSimilarityJoin(
           val change = ArrayBuffer[Int]()
           for (j <- addToDistributeWhen1(i)) {
             dis(j._1) += j._2.toLong
-            if (j._2 > 0) {
-              change += j._1
-            }
+//            if (j._2 > 0) {
+//              change += j._1
+//            }
           }
           var total = 0.toLong
-          for (ii <- 0 until topDegree) {
-            var max = 0.toLong
-            var maxPos = -1
-            var pos = 0
-            for (c <- change) {
-              if (dis(c) >= max) {
-                max = dis(c)
-                maxPos = pos
-              }
-              pos += 1
-            }
-            if (maxPos >= 0) {
-              change.remove(maxPos)
-              total += Math.pow(2, topDegree - ii - 1).toLong * max
-            }
-          }
+//          for (ii <- dis) {
+//            if (ii > total) {
+//              total = ii
+//            }
+//          }
+
+//          for (ii <- 0 until topDegree) {
+//            var max = 0.toLong
+//            var maxPos = -1
+//            var pos = 0
+//            for (c <- change) {
+//              if (dis(c) >= max) {
+//                max = dis(c)
+//                maxPos = pos
+//              }
+//              pos += 1
+//            }
+//            if (maxPos >= 0) {
+//              change.remove(maxPos)
+//              total += Math.pow(2, topDegree - ii - 1).toLong * max
+//            }
+//          }
           total
         }
       }.toArray
@@ -335,27 +342,33 @@ case class EditDistanceSelfSimilarityJoin(
           val change = ArrayBuffer[Int]()
           for (j <- addToDistributeWhen2(i)) {
             dis(j._1) += j._2.toLong
-            if (j._2 > 0) {
-              change += j._1
-            }
+//            if (j._2 > 0) {
+//              change += j._1
+//            }
           }
           var total = 0.toLong
-          for (ii <- 0 until topDegree) {
-            var max = 0.toLong
-            var maxPos = -1
-            var pos = 0
-            for (c <- change) {
-              if (dis(c) >= max) {
-                max = dis(c)
-                maxPos = pos
-              }
-              pos += 1
-            }
-            if (maxPos >= 0) {
-              change.remove(maxPos)
-              total += Math.pow(2, topDegree - ii - 1).toLong * max
-            }
-          }
+//          for (ii <- dis) {
+//            if (ii > total) {
+//              total = ii
+//            }
+//          }
+
+//          for (ii <- 0 until topDegree) {
+//            var max = 0.toLong
+//            var maxPos = -1
+//            var pos = 0
+//            for (c <- change) {
+//              if (dis(c) >= max) {
+//                max = dis(c)
+//                maxPos = pos
+//              }
+//              pos += 1
+//            }
+//            if (maxPos >= 0) {
+//              change.remove(maxPos)
+//              total += Math.pow(2, topDegree - ii - 1).toLong * max
+//            }
+//          }
           total
         }
       }.toArray
@@ -363,6 +376,7 @@ case class EditDistanceSelfSimilarityJoin(
       val deata0 = {
         for (i <- 0 until U + 1) yield {
           Tuple2(deata_distribute0(i), C1(i) - C0(i))
+//          Tuple2(0.toLong, C1(i) - C0(i))
           //        C1(i) - C0(i)
         }
       }.toArray
@@ -370,6 +384,7 @@ case class EditDistanceSelfSimilarityJoin(
       val deata1 = {
         for (i <- 0 until U + 1) yield {
           Tuple2(deata_distribute1(i) - deata_distribute0(i), C2(i) - C1(i))
+//          Tuple2(0.toLong, C2(i) - C1(i))
           //        C2(i) - C1(i)
         }
       }.toArray
@@ -648,7 +663,8 @@ case class EditDistanceSelfSimilarityJoin(
 
       if (!(query.isDeletion ^ index.isDeletion)) {
         if (queryHash != indexHash) {
-          EDdistance(query.record, index.record) < threshold
+//          EDdistance(query.record, index.record) < threshold
+          true
         } else {
           false
         }
@@ -670,8 +686,7 @@ case class EditDistanceSelfSimilarityJoin(
       .distinct
       .persist(StorageLevel.DISK_ONLY)
 
-    val indexLength = left_rdd
-      .distinct
+    val indexLength = record
       .map(x => (x.split(" ").size))
       .persist(StorageLevel.DISK_ONLY)
 
@@ -686,8 +701,7 @@ case class EditDistanceSelfSimilarityJoin(
     val partitionP = sparkContext
       .broadcast(calculateAllP(minLength.value, maxLength.value, partitionL.value))
 
-    val index_rdd = left_rdd
-      .distinct
+    val index_rdd = record
       .map(x => (x.split(" ").length, x))
       .filter(x => x._1 > threshold)
       .flatMap(x => part(x._2))
@@ -702,7 +716,9 @@ case class EditDistanceSelfSimilarityJoin(
           ((x._1, 0), 1)
         }
       })
-        .reduceByKey(_ + _).collectAsMap()
+        .reduceByKey(_ + _)
+        .filter(x => x._2 > abandonNum)
+        .collectAsMap()
     )
 
     val index_partitioned_rdd = new SimilarityRDD(index_rdd.partitionBy(
@@ -727,6 +743,7 @@ case class EditDistanceSelfSimilarityJoin(
       }).persist()
 
     val query_rdd = record
+      .filter(x => x.length > threshold)
       .map(x => (x.split(" ").length, x))
       .flatMap(x => parts(x._2, indexNum.value, partitionL.value, partitionP.value))
       .map(x => (x._1, x._2))
@@ -744,13 +761,29 @@ case class EditDistanceSelfSimilarityJoin(
       (leftIter, rightIter) => {
         val ans = ListBuffer[InternalRow]()
         val index = rightIter.next
+        val querySet = leftIter.toArray
+        var countNum = 0.toLong
         logInfo(s"index data length: " + index._2.length.toString)
-        leftIter
-          .flatMap(row => findSimilarity(row, index, num_partitions))
-          .map(x => InternalRow.
-            fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(x._1.toString),
-              org.apache.spark.unsafe.types.UTF8String.fromString(x._2.toString))))
-          .toArray.iterator
+        for (query <- querySet) {
+          if (index._1.contains(query._1)) {
+            for (i <- index._1(query._1)) {
+              if (compareSimilarity(query._2, index._2(i))) {
+                logInfo(s"success")
+                countNum += 1
+//                ans += InternalRow.
+//                  fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(query._2.record),
+//                    org.apache.spark.unsafe.types.UTF8String.fromString(index._2(i).record)))
+              } else {
+                logInfo(s"failed")
+              }
+            }
+          }
+        }
+        val c = ListBuffer[InternalRow]()
+        c += InternalRow.fromSeq(Seq(
+          org.apache.spark.unsafe.types.UTF8String.fromString(countNum.toString),
+          org.apache.spark.unsafe.types.UTF8String.fromString("number of verification")))
+        c.iterator
       }
     }
   }
