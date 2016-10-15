@@ -17,6 +17,7 @@
 
 package org.apache.spark.sql.index
 
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
@@ -263,7 +264,7 @@ private[sql] case class JaccardIndexIndexedRelation(
                                                      table_name: Option[String],
                                                      column_keys: List[Attribute],
                                                      index_name: String)(var _indexedRDD: RDD[PackedPartitionWithIndex] = null,
-                                                                         var indexRDD: RDD[IPartition] = null )
+                                                                         var indexRDD: RDD[IPartition] = null)
   extends IndexedRelation with MultiInstanceRelation {
   require(column_keys.length == 1)
   val numPartitions = child.sqlContext.conf.numSimilarityPartitions.toInt
@@ -385,7 +386,6 @@ private[sql] case class JaccardIndexIndexedRelation(
 
     val recordidMapSubstring = inverseRDD
       .map(x => {
-        logInfo(s"" + x)
         ((x._1, x._2), createInverse(x._1, multiGroup.value, threshold))
       })
       .flatMapValues(x => x)
@@ -395,11 +395,17 @@ private[sql] case class JaccardIndexIndexedRelation(
       .filter(x => (x._2.length > 0))
       .map(x => (x._1, createDeletion(x._2))) // (1,i,l), deletionSubstring
       .flatMapValues(x => x)
-      .map(x => ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, true)))
+      .map(x => {
+//        println(s"deletion index: " + x._2 + " " + x._1._2 + " " + x._1._3)
+        ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, true))
+      })
     // (hashCode, (String, internalrow))
 
     val inverseMapRecord = recordidMapSubstring
-      .map(x => ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, false)))
+      .map(x => {
+//        println(s"inverse index: " + x._2 + " " + x._1._2 + " " + x._1._3)
+        ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, false))
+      })
 
     val index = deletionMapRecord.union(inverseMapRecord).persist(StorageLevel.DISK_ONLY)
 
@@ -423,6 +429,12 @@ private[sql] case class JaccardIndexIndexedRelation(
 
     indexed.setName(table_name.map(n => s"$n $index_name").getOrElse(child.toString))
     indexed.count
+    child.sqlContext.indexManager.addIndexGlobalInfo(threshold,
+      frequencyTable,
+      multiGroup,
+      minimum.value,
+      alpha,
+      numPartitions)
     indexRDD = indexed
   }
 

@@ -23,6 +23,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.util.NumberConverter
 import org.apache.spark.sql.execution.LeafNode
 import org.apache.spark.sql.spatial._
+import org.apache.spark.sql.SimilarityPrompt._
 
 import scala.collection.mutable
 
@@ -290,12 +291,30 @@ private[sql] case class IndexedRelationScan(
             assert(jaccardSimilarity1.length == 1)
             val target = jaccardSimilarity1.head._1
             val delta = jaccardSimilarity1.head._2
-            jaccardSimilarity.indexRDD.flatMap {packed =>
-              val index = packed.index.asInstanceOf[JaccardIndex]
-              if (index != null) {
-                index.findIndex(packed.data, target, delta.toDouble)
-              } else Array[InternalRow]()
-            }
+            val global = sqlContext.indexManager.getIndexGlobalInfo(0)
+//            println(s"globalInfo in IndexedRelationScan is $global")
+            val partitionedQuery = JaccardSimSegmentation.partition_r(
+              JaccardSimSegmentation.sortByValue(target),
+              global.frequencyTable.value,
+              global.minimum,
+              global.multiGroup.value,
+              global.threshold,
+              global.alpha,
+              global.partitionNum
+            )
+            jaccardSimilarity.indexRDD.mapPartitionsWithIndex(
+              (partitionId, partitionData) => {
+                val packed = partitionData.next()
+                val index = packed.index.asInstanceOf[JaccardIndex]
+                if (index != null) {
+                  index.findIndex(packed.data,
+                    partitionedQuery.map(x => (x._1, x._2
+                      .filter(x => JaccardSimSegmentation.sendLocation(x._1,
+                        global.partitionNum) == partitionId))),
+                    delta.toDouble)
+                    .iterator
+                } else Array[InternalRow]().iterator
+              })
           }.reduce((a, b) => a.union(b)).map(_.copy()).distinct()
         } else jaccardSimilarity.indexRDD.flatMap(_.data.map(x => (x._1._2)))
       case other =>

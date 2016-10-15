@@ -20,6 +20,7 @@ package org.apache.spark.sql
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
 import org.apache.spark.Logging
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
@@ -43,9 +44,12 @@ case class IndexInfo(tableName: String, indexName: String,
                      attributes: Seq[Attribute], indexType: IndexType,
                      location: String, storageLevel: StorageLevel) extends Serializable
 
-case class IndexExtraInfo(tableName: String, indexName: String,
-                     attributes: Seq[Attribute], indexType: IndexType,
-                     location: String, storageLevel: StorageLevel) extends Serializable
+case class IndexGlobalInfo(threshold: Double,
+                           frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Int]],
+                           multiGroup: Broadcast[Array[(Int, Int)]],
+                           minimum: Int,
+                           alpha: Double,
+                           partitionNum: Int) extends Serializable
 
 private[sql] class IndexManager extends Logging {
   @transient
@@ -58,11 +62,22 @@ private[sql] class IndexManager extends Logging {
   private val indexInfos = new ArrayBuffer[IndexInfo]
 
   @transient
-  private val indexExtraInfos = new ArrayBuffer[IndexExtraInfo]
+  private val indexGlobalInfos = new ArrayBuffer[IndexGlobalInfo]
 
   def getIndexInfo: Array[IndexInfo] = indexInfos.toArray
 
   def getIndexData: Array[IndexedData] = indexedData.toArray
+
+  def getIndexGlobalInfo: Array[IndexGlobalInfo] = indexGlobalInfos.toArray
+
+  def addIndexGlobalInfo(threshold: Double,
+                         frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Int]],
+                         multiGroup: Broadcast[Array[(Int, Int)]],
+                         minimum: Int,
+                         alpha: Double,
+                         partitionNum: Int): Unit = {
+    indexGlobalInfos += IndexGlobalInfo(threshold, frequencyTable, multiGroup, minimum, alpha, partitionNum)
+  }
 
   private def readLock[A](f: => A): A = {
     val lock = indexLock.readLock()
