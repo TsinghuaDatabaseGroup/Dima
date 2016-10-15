@@ -15,7 +15,9 @@
  * limitations under the License.
  */
 package org.apache.spark.sql.partitioner
-
+/**
+  * Created by sunji on 16/10/15.
+  */
 import org.apache.spark.rdd.{RDD, ShuffledRDD}
 import org.apache.spark.shuffle.sort.SortShuffleManager
 import org.apache.spark.sql.catalyst.InternalRow

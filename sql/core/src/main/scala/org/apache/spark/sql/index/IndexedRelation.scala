@@ -245,6 +245,10 @@ private[sql] case class RTreeIndexedRelation(
   )
 }
 
+/**
+  * Created by sunji on 16/10/15.
+  */
+
 private[sql] case class IPartition(index: Index, data: Array[((String, InternalRow), Boolean)])
 
 private[sql] abstract class IndexedRelationForJaccard extends LogicalPlan {

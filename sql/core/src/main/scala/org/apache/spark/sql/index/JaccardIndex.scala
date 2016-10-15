@@ -18,6 +18,9 @@
 
 package org.apache.spark.sql.index
 
+/**
+  * Created by sunji on 16/10/15.
+  */
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.broadcast.Broadcast
