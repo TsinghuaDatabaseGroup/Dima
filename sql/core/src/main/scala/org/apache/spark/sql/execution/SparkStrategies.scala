@@ -28,7 +28,7 @@ import org.apache.spark.sql.execution.columnar.{InMemoryColumnarTableScan, InMem
 import org.apache.spark.sql.execution.datasources.{CreateTableUsing, CreateTempTableUsing, DescribeCommand => LogicalDescribeCommand, _}
 import org.apache.spark.sql.execution.joins._
 import org.apache.spark.sql.execution.{DescribeCommand => RunnableDescribeCommand}
-import org.apache.spark.sql.index.{IndexedRelation, IndexedRelationScan, RTreeType, TreeMapType}
+import org.apache.spark.sql.index.{IndexedRelation, IndexedRelationScan, RTreeType, TreeMapType, JaccardIndexType}
 import org.apache.spark.sql.{IndexInfo, Strategy, execution}
 
 private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
@@ -370,10 +370,12 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
 
   object IndexRelationScans extends Strategy with PredicateHelper{
     import org.apache.spark.sql.catalyst.expressions._
-    val indexInfos = sqlContext.indexManager.getIndexInfo
+    lazy val indexInfos = sqlContext.indexManager.getIndexInfo
     // lookup
     def lookupIndexInfo(attributes: Seq[Attribute]): IndexInfo = {
       var result: IndexInfo = null
+      println(s"attributes: $attributes")
+      indexInfos.foreach(x => println(s"IndexInfo: $x"))
       indexInfos.foreach(item => {
         if (item.indexType == RTreeType){
           val temp = item.attributes
@@ -389,6 +391,10 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           if (found) result = item
         } else if (item.indexType == TreeMapType) {
           if (attributes.length == 1 && item.attributes.head == attributes.head){
+            result = item
+          }
+        } else if (item.indexType == JaccardIndexType) {
+          if (attributes.length == 1 && item.attributes.head == attributes.head) {
             result = item
           }
         }
@@ -415,6 +421,9 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           lookupIndexInfo(point.map(x => x.toAttribute))
         case InCircleRange(point: Seq[NamedExpression], target: Seq[Expression], r: Literal) =>
           lookupIndexInfo(point.map(x => x.toAttribute))
+        case JaccardSimilarity(string: NamedExpression, target: Expression, delta: Literal) =>
+          println(s"leafNodeCanBeIndexed Enter: $string, $target, $delta")
+          lookupIndexInfo(Seq(string.toAttribute))
         case _ =>
           null
       }
@@ -445,7 +454,9 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
       val dnf_clauses = splitDNFPredicates(originalPredicate)
       var indexedOperations = Seq[Expression]()
       dnf_clauses.foreach(dnf => {
+        println(s"dnf: $dnf")
         val tempIndexedOperations = extractIndexOperation(dnf)
+        println(s"tempIndexedOperations: $tempIndexedOperations")
         if (tempIndexedOperations.nonEmpty){
           indexedOperations = indexedOperations :+ tempIndexedOperations.reduce{
             (a, b) => {
@@ -461,7 +472,9 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
 
     def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
       case PhysicalOperation(projectList, filters, indexed: IndexedRelation) =>
+        println(s"filters: $filters")
         val predicatesCanBeIndexed = selectFilter(filters)
+        println(s"predicate: $predicatesCanBeIndexed")
         pruneFilterProject(
           projectList,
           filters,   // the parent Filter node of IndexRelationSca

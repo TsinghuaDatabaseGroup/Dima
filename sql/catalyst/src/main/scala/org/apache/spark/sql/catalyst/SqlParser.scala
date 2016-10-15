@@ -121,6 +121,8 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
   protected val DISTANCE = Keyword("DISTANCE")
 
   // SimilarityJoin Keywords
+  protected val STRING = Keyword("STRING")
+  protected val JACCARDSIMILARITY = Keyword("JACCARDSIMILARITY")
   protected val SIMILARITY = Keyword("SIMILARITY")
   protected val SELFSIMILARITY = Keyword("SELFSIMILARITY")
   protected val JACCARD = Keyword("JACCARD")
@@ -205,11 +207,6 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
       (IN ~ POINT ~ "(" ~ POINT ~ "(" ~> repsep(termExpression, ",") <~ ")")
       ~ ("," ~> literal <~ ")") ^^
       { case point ~ target ~ l => InKNN(point, target, l) }
-    | ON ~> literal | ON ~> expression
-      | ON ~> (POINT ~ "(" ~> repsep(termExpression, ",")  <~ ")") ~
-      (IN ~ POINT ~ "(" ~ POINT ~ "(" ~> repsep(termExpression, ",") <~ ")")
-      ~ ("," ~> literal <~ ")") ^^
-      { case point ~ target ~ l => InJaccard(point, target, l) }
       )
 
   protected lazy val joinType: Parser[JoinType] =
@@ -264,6 +261,9 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
       (IN ~ CIRCLERANGE ~ "(" ~ POINT ~ "(" ~> repsep(termExpression, ",") <~ ")") ~
       ("," ~> literal <~ ")") ^^
       { case point ~ target ~ l => InCircleRange(point, target, l) }
+    | (JACCARDSIMILARITY ~ "(" ~> termExpression)
+      ~ ("," ~> termExpression <~ ")") ~ (">=" ~> literal) ^^
+      { case string ~ target ~ delta => JaccardSimilarity(string, target, delta) }
     | termExpression ~ ("="  ~> termExpression) ^^ { case e1 ~ e2 => EqualTo(e1, e2) }
     | termExpression ~ ("<"  ~> termExpression) ^^ { case e1 ~ e2 => LessThan(e1, e2) }
     | termExpression ~ ("<=" ~> termExpression) ^^ { case e1 ~ e2 => LessThanOrEqual(e1, e2) }

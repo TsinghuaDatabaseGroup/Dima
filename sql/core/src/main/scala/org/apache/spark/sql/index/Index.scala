@@ -28,6 +28,7 @@ object IndexType {
     case "rtree" => RTreeType
     case "treemap" => TreeMapType
     case "hashmap" => HashMapType
+    case "jaccardindex" => JaccardIndexType
     case _ => null
   }
 }
@@ -37,3 +38,4 @@ sealed abstract class IndexType
 case object RTreeType extends IndexType
 case object TreeMapType extends IndexType
 case object HashMapType extends IndexType
+case object JaccardIndexType extends IndexType

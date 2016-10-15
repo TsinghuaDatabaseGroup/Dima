@@ -318,18 +318,46 @@ case class InKNN(point: Seq[Expression],
   override def eval(input: InternalRow): Any = true
 }
 
-case class InJaccard(point: Seq[Expression],
-                 target: Seq[Expression],
-                 k: Literal) extends Predicate with CodegenFallback {
-  override def children: Seq[Expression] = point ++ target ++ Seq(k)
+object JaccardSimilarity {
+  def jaccardSimilarity(s1: String, s2: String, delta: Int = 10000): Double = {
+    if (math.abs(s1.length - s2.length) > delta) {
+      return (delta + 1)
+    }
+
+    val dist = Array.tabulate(s2.length + 1, s1.length + 1){
+      (j, i) => if (j == 0) i else if (i == 0) j else 0
+    }
+
+    for (j <- 1 to s2.length; i <- 1 to s1.length)
+      dist(j)(i) = if (s2(j - 1) == s1(i - 1)) dist(j - 1)(i - 1)
+      else math.min(math.min(dist(j - 1)(i) + 1, dist(j)(i - 1) + 1), dist(j - 1)(i - 1) + 1)
+
+    dist(s2.length)(s1.length)
+  }
+
+  def apply(s1: String, s2: String): Double = jaccardSimilarity(s1, s2)
+}
+
+case class JaccardSimilarity(string: Expression,
+                        target: Expression,
+                        delta: Literal) extends Predicate with CodegenFallback {
+//  require(delta.dataType.isInstanceOf[DoubleType])
+
+  override def children: Seq[Expression] = Seq(string, target, delta)
 
   override def nullable: Boolean = false
 
-  override def toString: String = s" **($point) IN JACCARD ($target) with threshold ($k)"
+  override def toString: String = s" **($string) IN JACCARD SIMILARITY ($target) within ($delta)"
 
-  // XX Tricky hack
   /** Returns the result of evaluating this expression on a given input Row */
-  override def eval(input: InternalRow): Any = true
+  override def eval(input: InternalRow): Any = {
+    val eval_string = string.eval(input).toString
+    val eval_target = target.eval(input).toString
+    val eval_delta = delta.value.asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
+
+//    JaccardSimilarity.jaccardSimilarity(eval_string, eval_target) <= eval_delta
+    true
+  }
 }
 
 case class Intersects(left: Expression, right: Expression)

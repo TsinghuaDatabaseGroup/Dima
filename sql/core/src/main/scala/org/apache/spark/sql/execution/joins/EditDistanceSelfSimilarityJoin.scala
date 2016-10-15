@@ -32,15 +32,17 @@ import org.apache.spark.sql.execution.SimilarityRDD
   */
 
 case class EditDistanceSelfSimilarityJoin(
-                                       l: Literal,
-                                       left: SparkPlan,
-                                       right: SparkPlan) extends BinaryNode {
+                                           l: Literal,
+                                           left: SparkPlan,
+                                           right: SparkPlan) extends BinaryNode {
   override def output: Seq[Attribute] = left.output ++ right.output
 
   final val num_partitions = sqlContext.conf.numSimilarityPartitions.toInt
   final val threshold = sqlContext.conf.similarityEditDistanceThreshold.toInt
   final val topDegree = sqlContext.conf.similarityBalanceTopDegree.toInt
   final val abandonNum = sqlContext.conf.similarityFrequencyAbandonNum.toInt
+  final val tradeOff = sqlContext.conf.similarityTradeOff.toInt
+  final val weight = sqlContext.conf.similarityMaxWeight.split(",").map(x => x.toInt)
 
   override protected def doExecute(): RDD[InternalRow] = {
     logInfo(s"execute IndexSimilarityJoin")
@@ -304,33 +306,33 @@ case class EditDistanceSelfSimilarityJoin(
           val change = ArrayBuffer[Int]()
           for (j <- addToDistributeWhen1(i)) {
             dis(j._1) += j._2.toLong
-//            if (j._2 > 0) {
-//              change += j._1
-//            }
+            if (j._2 > 0) {
+              change += j._1
+            }
           }
           var total = 0.toLong
-//          for (ii <- dis) {
-//            if (ii > total) {
-//              total = ii
-//            }
-//          }
+          //          for (ii <- dis) {
+          //            if (ii > total) {
+          //              total = ii
+          //            }
+          //          }
 
-//          for (ii <- 0 until topDegree) {
-//            var max = 0.toLong
-//            var maxPos = -1
-//            var pos = 0
-//            for (c <- change) {
-//              if (dis(c) >= max) {
-//                max = dis(c)
-//                maxPos = pos
-//              }
-//              pos += 1
-//            }
-//            if (maxPos >= 0) {
-//              change.remove(maxPos)
-//              total += Math.pow(2, topDegree - ii - 1).toLong * max
-//            }
-//          }
+          for (ii <- 0 until topDegree) {
+            var max = 0.toLong
+            var maxPos = -1
+            var pos = 0
+            for (c <- change) {
+              if (dis(c) >= max) {
+                max = dis(c)
+                maxPos = pos
+              }
+              pos += 1
+            }
+            if (maxPos >= 0) {
+              change.remove(maxPos)
+              total += weight(ii) * max
+            }
+          }
           total
         }
       }.toArray
@@ -342,49 +344,49 @@ case class EditDistanceSelfSimilarityJoin(
           val change = ArrayBuffer[Int]()
           for (j <- addToDistributeWhen2(i)) {
             dis(j._1) += j._2.toLong
-//            if (j._2 > 0) {
-//              change += j._1
-//            }
+            if (j._2 > 0) {
+              change += j._1
+            }
           }
           var total = 0.toLong
-//          for (ii <- dis) {
-//            if (ii > total) {
-//              total = ii
-//            }
-//          }
+          //          for (ii <- dis) {
+          //            if (ii > total) {
+          //              total = ii
+          //            }
+          //          }
 
-//          for (ii <- 0 until topDegree) {
-//            var max = 0.toLong
-//            var maxPos = -1
-//            var pos = 0
-//            for (c <- change) {
-//              if (dis(c) >= max) {
-//                max = dis(c)
-//                maxPos = pos
-//              }
-//              pos += 1
-//            }
-//            if (maxPos >= 0) {
-//              change.remove(maxPos)
-//              total += Math.pow(2, topDegree - ii - 1).toLong * max
-//            }
-//          }
-          total
+          for (ii <- 0 until topDegree) {
+            var max = 0.toLong
+            var maxPos = -1
+            var pos = 0
+            for (c <- change) {
+              if (dis(c) >= max) {
+                max = dis(c)
+                maxPos = pos
+              }
+              pos += 1
+            }
+            if (maxPos >= 0) {
+              change.remove(maxPos)
+              total += weight(ii) * max
+            }
+          }
+          total - deata_distribute0(i)
         }
       }.toArray
 
       val deata0 = {
         for (i <- 0 until U + 1) yield {
-          Tuple2(deata_distribute0(i), C1(i) - C0(i))
-//          Tuple2(0.toLong, C1(i) - C0(i))
+          Tuple2(deata_distribute0(i), C1(i))
+          //          Tuple2(0.toLong, C1(i) - C0(i))
           //        C1(i) - C0(i)
         }
       }.toArray
 
       val deata1 = {
         for (i <- 0 until U + 1) yield {
-          Tuple2(deata_distribute1(i) - deata_distribute0(i), C2(i) - C1(i))
-//          Tuple2(0.toLong, C2(i) - C1(i))
+          Tuple2(deata_distribute1(i), C2(i) - C1(i))
+          //          Tuple2(0.toLong, C2(i) - C1(i))
           //        C2(i) - C1(i)
         }
       }.toArray
@@ -663,7 +665,7 @@ case class EditDistanceSelfSimilarityJoin(
 
       if (!(query.isDeletion ^ index.isDeletion)) {
         if (queryHash != indexHash) {
-//          EDdistance(query.record, index.record) < threshold
+          //          EDdistance(query.record, index.record) < threshold
           true
         } else {
           false
@@ -770,9 +772,9 @@ case class EditDistanceSelfSimilarityJoin(
               if (compareSimilarity(query._2, index._2(i))) {
                 logInfo(s"success")
                 countNum += 1
-//                ans += InternalRow.
-//                  fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(query._2.record),
-//                    org.apache.spark.unsafe.types.UTF8String.fromString(index._2(i).record)))
+                //                ans += InternalRow.
+                //                  fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(query._2.record),
+                //                    org.apache.spark.unsafe.types.UTF8String.fromString(index._2(i).record)))
               } else {
                 logInfo(s"failed")
               }

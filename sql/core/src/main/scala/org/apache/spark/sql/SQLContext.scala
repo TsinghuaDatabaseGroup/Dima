@@ -67,7 +67,7 @@ import scala.util.control.NonFatal
 class SQLContext private[sql](
     @transient val sparkContext: SparkContext,
     @transient protected[sql] val cacheManager: CacheManager,
-    @transient protected[sql] val indexManager: IndexManager,
+    @transient val indexManager: IndexManager,
     @transient private[sql] val listener: SQLListener,
     val isRootContext: Boolean)
   extends org.apache.spark.Logging with Serializable {

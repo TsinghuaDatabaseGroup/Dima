@@ -43,9 +43,14 @@ case class JaccardSelfSimilarityJoinV2(
   final val threshold = sqlContext.conf.similarityJaccardThreshold.toDouble
   final val alpha = sqlContext.conf.similarityMultigroupThreshold.toDouble
   final val topDegree = sqlContext.conf.similarityBalanceTopDegree.toInt
+  final val abandonNum = sqlContext.conf.similarityFrequencyAbandonNum.toInt
+  final val tradeOff = sqlContext.conf.similarityTradeOff.toInt
+  final val weight = sqlContext.conf.similarityMaxWeight.split(",").map(x => x.toInt)
+  //final val initialDistribute = sqlContext.conf.similarityInitDistribute.split(",").map(x => x.toLong)
 
   override protected def doExecute(): RDD[InternalRow] = {
     logInfo(s"execute JaccardSelfSimilarityJoin")
+    // val distribute = initialDistribute.clone()
     val distribute = new Array[Long](2048)
 
     def CalculateH ( l: Int, s: Int, threshold: Double ) = {
@@ -85,11 +90,7 @@ case class JaccardSelfSimilarityJoinV2(
       }
       for (i <- createDeletion(xi)) {
         val hash = (i, ii, ll).hashCode()
-        if (indexNum.contains((hash, 0))) {
-          total = total + indexNum((hash, 0))
-        } else {
-          total
-        }
+        total = total + indexNum.getOrElse((hash, 0), 0)
       }
       total
     }
@@ -116,9 +117,7 @@ case class JaccardSelfSimilarityJoinV2(
             code
           }
         }
-        if (indexNum.contains((hash, 0))) {
-          result += Tuple2(partition, indexNum((hash, 0)))
-        }
+        result += Tuple2(partition, indexNum.getOrElse((hash, 0), 0))
       }
       result.toArray
     }
@@ -245,23 +244,15 @@ case class JaccardSelfSimilarityJoinV2(
       val C1 = {
         for (i <- 1 until H + 1) yield {
           val key = ((substring(i - 1), i, l).hashCode(), 0)
-          if (indexNum.contains(key)) {
-            indexNum(key)
-          } else {
-              0
-          }
+          indexNum.getOrElse(key, 0)
         }
       }.toArray
       val C2 = {
         for (i <- 1 until H + 1) yield {
           val key = ((substring(i - 1), i, l).hashCode(), 1)
-          if (indexNum.contains(key)) {
-            C1(i - 1) +
-              indexNum(key) +
-              inverseDel(substring(i - 1), indexNum, i, l, minimum)
-          } else {
-              C1(i - 1) + inverseDel(substring(i - 1), indexNum, i, l, minimum)
-          }
+          C1(i - 1) +
+            indexNum.getOrElse(key, 0) +
+            inverseDel(substring(i - 1), indexNum, i, l, minimum)
         }
       }.toArray
 
@@ -276,12 +267,7 @@ case class JaccardSelfSimilarityJoinV2(
               code
             }
           }
-          try {
-            (partition, indexNum((hash, 0)))
-          } catch {
-            case e: NoSuchElementException =>
-              (partition, 0)
-          }
+          (partition, indexNum.getOrElse((hash, 0), 0))
         }
       }.toArray
 
@@ -297,11 +283,10 @@ case class JaccardSelfSimilarityJoinV2(
             }
           }
           val x = addToMapForInverseDel(substring(i - 1), indexNum, i, l, minimum, numPartition)
-          if (indexNum.contains((hash, 1))) {
-            Array.concat(Array(addToDistributeWhen1(i - 1), (partition, indexNum((hash, 1)))), x)
-          } else {
-            Array.concat(Array(addToDistributeWhen1(i - 1)), x)
-          }
+          Array.concat(Array(
+            addToDistributeWhen1(i - 1),
+            (partition, indexNum.getOrElse((hash, 1), 0))
+          ), x)
         }
       }.toArray
 
@@ -310,9 +295,9 @@ case class JaccardSelfSimilarityJoinV2(
         for (i <- 0 until H) yield {
           // 分配到1之后情况比较单一,只有inverseindex 和 inversequery匹配这一种情况,只会对一个reducer产生影响
           val max = {
-            if (addToDistributeWhen1(i)._2 > 0) {
+            if (addToDistributeWhen1(i)._2 > 0 && topDegree > 0) {
               (distribute(addToDistributeWhen1(i)._1) +
-                addToDistributeWhen1(i)._2.toLong)*Math.pow(2, topDegree - 1).toLong
+                addToDistributeWhen1(i)._2.toLong)*weight(0)
             } else {
               0.toLong
             }
@@ -346,7 +331,7 @@ case class JaccardSelfSimilarityJoinV2(
             }
             if (maxPos >= 0) {
               change.remove(maxPos)
-              total += Math.pow(2, topDegree - ii - 1).toLong * max
+              total += weight(ii) * max
             }
           }
           total
@@ -362,7 +347,7 @@ case class JaccardSelfSimilarityJoinV2(
 
       val deata1 = {
         for (i <- 0 until H) yield {
-          Tuple2(deata_distribute1(i) - deata_distribute0(i), C2(i) - C1(i))
+          Tuple2(deata_distribute1(i), C2(i) - C1(i))
           //        C2(i) - C1(i)
         }
       }.toArray
@@ -659,7 +644,8 @@ case class JaccardSelfSimilarityJoinV2(
         if (!query._2 && query._3.length > 0 && query._3(0)) {
           // query from inverse with value 2
           if (query._1._1 != index._1._1) {
-            verify(query._1._2, index._1._2, threshold, pos)
+//            verify(query._1._2, index._1._2, threshold, pos)
+            true
           } else {
             false
           }
@@ -671,28 +657,32 @@ case class JaccardSelfSimilarityJoinV2(
         if (!query._2 && !query._4 && query._3.length > 0) {
           // query from inverse index with value 2 or 1
           if (query._1._1 < index._1._1) {
-            verify(query._1._2, index._1._2, threshold, pos)
+//            verify(query._1._2, index._1._2, threshold, pos)
+            true
           } else {
             false
           }
         } else if (!query._2 && query._4 && query._3.length > 0) {
           // query from inverse query with value 2 or 1
           if (query._1._1 != index._1._1) {
-            verify(query._1._2, index._1._2, threshold, pos)
+//            verify(query._1._2, index._1._2, threshold, pos)
+            true
           } else {
             false
           }
         } else if (query._2 && !query._4 && query._3.length > 0 && query._3(0)) {
           // query from deletion index with value 2
           if (query._1._1 < index._1._1) {
-            verify(query._1._2, index._1._2, threshold, pos)
+//            verify(query._1._2, index._1._2, threshold, pos)
+            true
           } else {
             false
           }
         } else if (query._2 && query._4 && query._3.length > 0 && query._3(0)) {
           // query from deletion query with value 2
           if (query._1._1 != index._1._1) {
-            verify(query._1._2, index._1._2, threshold, pos)
+//            verify(query._1._2, index._1._2, threshold, pos)
+            true
           } else {
             false
           }
@@ -766,7 +756,7 @@ case class JaccardSelfSimilarityJoinV2(
           .map(x => ((x._1.hashCode, 0), 1))
           .union(deletionMapRecord.map(x => ((x._1.hashCode(), 1), 1)))
           .reduceByKey(_ + _)
-          .filter(x => (x._2 > 2))
+          .filter(x => (x._2 > abandonNum))
           .collectAsMap()
       )
     recordidMapSubstring.unpersist()
@@ -783,6 +773,8 @@ case class JaccardSelfSimilarityJoinV2(
       .flatMapValues(x => x)
       .map(x => (x._2._1, (x._1, x._2._2, x._2._3, x._2._4, x._2._5)))
       .persist(StorageLevel.DISK_ONLY)
+
+    query_rdd.count
 
     val rdd_partitioned = query_rdd
       .partitionBy(new SimilarityHashPartitioner(num_partitions))
@@ -801,12 +793,7 @@ case class JaccardSelfSimilarityJoinV2(
         val index = Map[Int, List[Int]]()
         logInfo(s"data length: " + data.length.toString)
         for (i <- 0 until data.length) {
-          if (index.contains(data(i)._1)) {
-            val position = index(data(i)._1)
-            index += (data(i)._1 -> (position ::: List(i)))
-          } else {
-            index += (data(i)._1 -> List(i))
-          }
+          index += (data(i)._1 -> (i :: index.getOrElse(data(i)._1, List())))
         }
         logInfo(s"index length: " + index.size.toString)
         Array((index, data.map(x => x._2))).iterator
@@ -823,28 +810,35 @@ case class JaccardSelfSimilarityJoinV2(
           // logInfo(leftIter.length.toString())
           val ans = mutable.ListBuffer[InternalRow]()
           val index = rightIter.next
+          var countNum = 0.toLong
           logInfo(s"index data length: " + index._2.length.toString)
-          val query_data = leftIter.toArray
-          for (q <- query_data) {
+          while (leftIter.hasNext) {
+            val q = leftIter.next
             logInfo(s"enter in findSimilarity")
             val result = ArrayBuffer[(Int, Int)]()
             logInfo(s"" + q._1.toString)
             // this is the partition which I want to search
-            if (index._1.contains(q._1)) {
-              for (i <- index._1(q._1)) {
-                if (compareSimilarity(q._2, index._2(i))) {
-                  logInfo(s"success")
-                  ans += InternalRow.
-                    fromSeq(Seq(
-                      org.apache.spark.unsafe.types.UTF8String.fromString(q._2._1._1.toString),
-                      org.apache.spark.unsafe.types.UTF8String.fromString(index._2(i)._1._1.toString)
-                    ))
-                } else {
-                  logInfo(s"failed")
-                }
+            val candidate = index._1.getOrElse(q._1, List())
+            for (i <- candidate) {
+              if (compareSimilarity(q._2, index._2(i))) {
+                logInfo(s"success")
+                //                  ans += InternalRow.
+                //                    fromSeq(Seq(
+                //                      org.apache.spark.unsafe.types.UTF8String.fromString(q._2._1._1.toString),
+                //                      org.apache.spark.unsafe.types.UTF8String.fromString(index._2(i)._1._1.toString)
+                //                    ))
+                countNum += 1
+              } else {
+                logInfo(s"failed")
               }
             }
           }
+//          ans.iterator
+          ans += InternalRow.
+            fromSeq(Seq(
+              org.apache.spark.unsafe.types.UTF8String.fromString(countNum.toString),
+              org.apache.spark.unsafe.types.UTF8String.fromString("verification num")
+            ))
           ans.iterator
         }
     }

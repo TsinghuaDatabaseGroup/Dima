@@ -21,7 +21,7 @@ import org.apache.spark.sql.catalyst.AbstractSparkSQLParser
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.catalyst.plans.logical
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
-import org.apache.spark.sql.index.{HashMapType, IndexType, RTreeType, TreeMapType}
+import org.apache.spark.sql.index.{HashMapType, IndexType, RTreeType, TreeMapType, JaccardIndexType}
 import org.apache.spark.sql.types.StringType
 
 import scala.util.parsing.combinator.RegexParsers
@@ -75,6 +75,7 @@ class SparkSQLParser(fallback: String => LogicalPlan) extends AbstractSparkSQLPa
   protected val DEINDEX = Keyword("DEINDEX")
   protected val HASHMAP = Keyword("HASHMAP")
   protected val TREEMAP = Keyword("TREEMAP")
+  protected val JACCARDINDEX = Keyword("JACCARDINDEX")
   protected val RTREE = Keyword("RTREE")
   protected val LOAD = Keyword("LOAD")
   protected val PERSIST = Keyword("PERSIST")
@@ -93,6 +94,7 @@ class SparkSQLParser(fallback: String => LogicalPlan) extends AbstractSparkSQLPa
     ( RTREE           ^^^ RTreeType
       | TREEMAP       ^^^ TreeMapType
       | HASHMAP       ^^^ HashMapType
+      | JACCARDINDEX  ^^^ JaccardIndexType
       )
 
   private lazy val deindex: Parser[LogicalPlan] = (

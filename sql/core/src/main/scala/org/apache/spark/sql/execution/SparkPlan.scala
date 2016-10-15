@@ -45,7 +45,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
   @transient
   protected[spark] final val sqlContext = SQLContext.getActive().getOrElse(null)
 
-  protected def sparkContext = sqlContext.sparkContext
+  protected[spark] def sparkContext = sqlContext.sparkContext
 
   // sqlContext will be null when we are being deserialized on the slaves.  In this instance
   // the value of subexpressionEliminationEnabled will be set by the desserializer after the

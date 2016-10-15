@@ -276,6 +276,28 @@ private[sql] case class IndexedRelationScan(
             }
           }.reduce((a, b) => a.union(b)).map(_.copy()).distinct()
         } else rtree._indexedRDD.flatMap(_.data)
+      case jaccardSimilarity @ JaccardIndexIndexedRelation(_, _, _, column_keys, _) =>
+        if (predicates.nonEmpty) {
+          predicates.map { predicate =>
+            val exps = splitConjunctivePredicates(predicate)
+            var jaccardSimilarity1 = Array[(String, Double)]()
+            exps.foreach {
+              case JaccardSimilarity(string: Expression, target: Literal, delta: Literal) =>
+                val eval_target = target.value.toString
+                val eval_delta = delta.value.asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
+                jaccardSimilarity1 = jaccardSimilarity1 :+(eval_target, eval_delta)
+            }
+            assert(jaccardSimilarity1.length == 1)
+            val target = jaccardSimilarity1.head._1
+            val delta = jaccardSimilarity1.head._2
+            jaccardSimilarity.indexRDD.flatMap {packed =>
+              val index = packed.index.asInstanceOf[JaccardIndex]
+              if (index != null) {
+                index.findIndex(packed.data, target, delta.toDouble)
+              } else Array[InternalRow]()
+            }
+          }.reduce((a, b) => a.union(b)).map(_.copy()).distinct()
+        } else jaccardSimilarity.indexRDD.flatMap(_.data.map(x => (x._1._2)))
       case other =>
         other.indexedRDD.flatMap(_.data)
     }

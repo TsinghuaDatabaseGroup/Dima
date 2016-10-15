@@ -20,9 +20,14 @@ package org.apache.spark.sql
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
 import org.apache.spark.Logging
-import org.apache.spark.sql.catalyst.expressions.Attribute
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
+import org.apache.spark.sql.catalyst.expressions.{Attribute, BindReferences}
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Statistics}
+import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.index._
+import org.apache.spark.sql.partitioner.SimilarityHashPartitioner
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.storage.StorageLevel._
 
@@ -32,9 +37,13 @@ import scala.collection.mutable.ArrayBuffer
   * Created by dong on 1/20/16.
   * Index Manager for Simba
   */
-private case class IndexedData(name: String, plan: LogicalPlan, indexedData: IndexedRelation)
+case class IndexedData(name: String, plan: LogicalPlan, indexedData: IndexedRelation)
 
 case class IndexInfo(tableName: String, indexName: String,
+                     attributes: Seq[Attribute], indexType: IndexType,
+                     location: String, storageLevel: StorageLevel) extends Serializable
+
+case class IndexExtraInfo(tableName: String, indexName: String,
                      attributes: Seq[Attribute], indexType: IndexType,
                      location: String, storageLevel: StorageLevel) extends Serializable
 
@@ -48,7 +57,12 @@ private[sql] class IndexManager extends Logging {
   @transient
   private val indexInfos = new ArrayBuffer[IndexInfo]
 
+  @transient
+  private val indexExtraInfos = new ArrayBuffer[IndexExtraInfo]
+
   def getIndexInfo: Array[IndexInfo] = indexInfos.toArray
+
+  def getIndexData: Array[IndexedData] = indexedData.toArray
 
   private def readLock[A](f: => A): A = {
     val lock = indexLock.readLock()
