@@ -19,11 +19,14 @@ package org.apache.spark.sql.execution.joins
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Literal}
-import org.apache.spark.sql.execution.{BinaryNode, SparkPlan}
+import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.expressions.{Attribute, JoinedRow, Literal}
+import org.apache.spark.sql.execution.{BinaryNode, SimilarityRDD, SparkPlan}
+import org.apache.spark.sql.index.{IPartition, JaccardIndex}
 import org.apache.spark.sql.partitioner.SimilarityHashPartitioner
 import org.apache.spark.storage.StorageLevel
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 /**
@@ -31,28 +34,30 @@ import scala.collection.mutable.ArrayBuffer
   */
 
 
-
-case class JaccardSelfSimilarityJoin(
-                                  l: Literal,
-                                  left: SparkPlan,
-                                  right: SparkPlan) extends BinaryNode {
+case class JaccardSelfSimilarityJoin(leftKeys: Expression,
+                                       rightKeys: Expression,
+                                       l: Literal,
+                                       left: SparkPlan,
+                                       right: SparkPlan) extends BinaryNode {
   override def output: Seq[Attribute] = left.output ++ right.output
 
-  final val num_partitions = sqlContext.conf.numSimilarityPartitions.toInt
-  final val threshold = sqlContext.conf.similarityJaccardThreshold.toDouble
-  final val alpha = sqlContext.conf.similarityMultigroupThreshold.toDouble
-  final val topDegree = sqlContext.conf.similarityBalanceTopDegree.toInt
+  final val num_partitions = sqlContext.conf.numSimilarityPartitions
+  final val threshold = l.toString.toDouble
+  final val alpha = sqlContext.conf.similarityMultigroupThreshold
+  final val topDegree = sqlContext.conf.similarityBalanceTopDegree
+  final val abandonNum = sqlContext.conf.similarityFrequencyAbandonNum
+  final val tradeOff = sqlContext.conf.similarityTradeOff
+  final val weight = sqlContext.conf.similarityMaxWeight.split(",").map(x => x.toInt)
 
   override protected def doExecute(): RDD[InternalRow] = {
     logInfo(s"execute JaccardSelfSimilarityJoin")
     val distribute = new Array[Long](2048)
-
+    val indexDistribute = new Array[Long](2048)
     def CalculateH ( l: Int, s: Int, threshold: Double ) = {
       Math.floor((1 - threshold) * (l + s) / (1 + threshold) + 0.0001).toInt + 1
     }
 
     def CalculateH1 ( l: Int, threshold: Double ): Int = {
-      // 生成分段的段数(按照query长度)
       Math.floor ( (1 - threshold) * l / threshold + 0.0001).toInt + 1
     }
 
@@ -73,7 +78,7 @@ case class JaccardSelfSimilarityJoin(
 
     def inverseDel (
                      xi: String,
-                     indexNum: scala.collection.Map [ ( Int, Int ), Int ],
+                     indexNum: scala.collection.Map [(Int, Boolean), Int],
                      ii: Int,
                      ll: Int,
                      minimum: Int
@@ -84,42 +89,28 @@ case class JaccardSelfSimilarityJoin(
       }
       for (i <- createDeletion(xi)) {
         val hash = (i, ii, ll).hashCode()
-        val hasi = indexNum.contains((hash, 0))
-        if (hasi) {
-          total = total + indexNum((hash, 0))
-        } else {
-          total
-        }
+        total = total + indexNum.getOrElse((hash, false), 0)
       }
       total
     }
 
     def addToMapForInverseDel(
                                xi: String,
-                               indexNum: scala.collection.Map[(Int, Int), Int],
+                               indexNum: scala.collection.Map[(Int, Boolean), Int],
+                               partitionTable: scala.collection.Map[Int, Int],
                                ii: Int,
                                ll: Int,
                                minimum: Int,
                                numPartition: Int
                              ): Array[(Int, Int)] = {
       if (xi.length == 0) {
-        return null
+        return Array[(Int, Int)]()
       }
       var result = ArrayBuffer[(Int, Int)]()
       for (i <- createDeletion(xi)) {
         val hash = (i, ii, ll).hashCode()
-        val hasi = indexNum.contains((hash, 0))
-        val code = (hash % numPartition)
-        val partition = {
-          if (code < 0) {
-            code + numPartition
-          } else {
-            code
-          }
-        }
-        if (hasi) {
-          result += Tuple2(partition, indexNum((hash, 0)))
-        }
+        val partition = partitionTable.getOrElse(hash, hashStrategy(hash))
+        result += Tuple2(partition, indexNum.getOrElse((hash, false), 0))
       }
       result.toArray
     }
@@ -225,14 +216,23 @@ case class JaccardSelfSimilarityJoin(
       AA
     }
 
+    def hashStrategy(key: Int): Int = {
+      val code = (key % num_partitions)
+      if (code < 0) {
+        code + num_partitions
+      } else {
+        code
+      }
+    }
+
     def calculateVsl(
                       s: Int,
                       l: Int,
-                      indexNum: scala.collection.Map[(Int, Int), Int],
+                      indexNum: scala.collection.Map[(Int, Boolean), Int],
+                      partitionTable: scala.collection.Map[Int, Int],
                       substring: Array[String],
                       H: Int,
                       minimum: Int,
-                      threshold: Double,
                       alpha: Double,
                       numPartition: Int,
                       topDegree: Int
@@ -245,68 +245,42 @@ case class JaccardSelfSimilarityJoin(
       }.toArray
       val C1 = {
         for (i <- 1 until H + 1) yield {
-          try {
-            indexNum(((substring(i - 1), i, l).hashCode(), 0))
-          } catch {
-            case e: NoSuchElementException =>
-              0
-          }
+          val key = ((substring(i - 1), i, l).hashCode(), false)
+          indexNum.getOrElse(key, 0)
         }
       }.toArray
       val C2 = {
         for (i <- 1 until H + 1) yield {
-          try {
-            C1(i - 1) +
-              indexNum(((substring(i - 1), i, l).hashCode(), 1)) +
-              inverseDel(substring(i - 1), indexNum, i, l, minimum)
-          } catch {
-            case e: NoSuchElementException =>
-              C1(i - 1) + inverseDel(substring(i - 1), indexNum, i, l, minimum)
-          }
+          val key = ((substring(i - 1), i, l).hashCode(), true)
+          C1(i - 1) +
+            indexNum.getOrElse(key, 0) +
+            inverseDel(substring(i - 1), indexNum, i, l, minimum)
         }
       }.toArray
 
       val addToDistributeWhen1 = {
         for (i <- 1 until H + 1) yield {
           val hash = (substring(i - 1), i, l).hashCode()
-          val code = (hash % numPartition)
-          val partition = {
-            if (code < 0) {
-              code + numPartition
-            } else {
-              code
-            }
-          }
-          try {
-            (partition, indexNum((hash, 0)))
-          } catch {
-            case e: NoSuchElementException =>
-              (partition, 0)
-          }
+          val partition = partitionTable.getOrElse(hash, hashStrategy(hash))
+          (partition, indexNum.getOrElse((hash, false), 0))
         }
       }.toArray
 
       val addToDistributeWhen2 = {
         for (i <- 1 until H + 1) yield {
           val hash = (substring(i - 1), i, l).hashCode()
-          val code = (hash % numPartition)
-          val partition = {
-            if (code < 0) {
-              code + numPartition
-            } else {
-              code
-            }
-          }
-          val x = addToMapForInverseDel(substring(i - 1), indexNum, i, l, minimum, numPartition)
-          if (indexNum.contains((hash, 1)) && x != null && x.length > 0) {
-            Array.concat(Array((partition, indexNum((hash, 1)))), x)
-          } else if (indexNum.contains((hash, 1))) {
-            Array((partition, indexNum((hash, 1))))
-          } else if (x != null && x.length > 0) {
-            x
-          } else {
-            Array((partition, 0))
-          }
+          val partition = partitionTable.getOrElse(hash, hashStrategy(hash))
+          val x = addToMapForInverseDel(substring(i - 1),
+            indexNum,
+            partitionTable,
+            i,
+            l,
+            minimum,
+            numPartition)
+          Array.concat(Array(
+            addToDistributeWhen1(i - 1),
+            (partition, indexNum.getOrElse((hash, true), 0))
+          ), x)
         }
       }.toArray
 
@@ -315,9 +289,9 @@ case class JaccardSelfSimilarityJoin(
         for (i <- 0 until H) yield {
           // 分配到1之后情况比较单一,只有inverseindex 和 inversequery匹配这一种情况,只会对一个reducer产生影响
           val max = {
-            if (addToDistributeWhen1(i)._2 > 0) {
+            if (addToDistributeWhen1(i)._2 > 0 && topDegree > 0) {
               (distribute(addToDistributeWhen1(i)._1) +
-                addToDistributeWhen1(i)._2.toLong)*Math.pow(2, topDegree-1).toLong
+                addToDistributeWhen1(i)._2.toLong)*weight(0)
             } else {
               0.toLong
             }
@@ -338,7 +312,7 @@ case class JaccardSelfSimilarityJoin(
             }
           }
           var total = 0.toLong
-          for (i <- 0 until topDegree) {
+          for (ii <- 0 until topDegree) {
             var max = 0.toLong
             var maxPos = -1
             var pos = 0
@@ -351,7 +325,7 @@ case class JaccardSelfSimilarityJoin(
             }
             if (maxPos >= 0) {
               change.remove(maxPos)
-              total += Math.pow(2, topDegree - i - 1).toLong * max
+              total += weight(ii) * max
             }
           }
           total
@@ -399,29 +373,16 @@ case class JaccardSelfSimilarityJoin(
           for (j <- addToDistributeWhen2(chooseid)) {
             distribute(j._1) += j._2.toLong
           }
-          distribute(addToDistributeWhen1(chooseid)._1) += addToDistributeWhen1(chooseid)._2.toLong
         }
       }
-      //
-      //    println("distribute:")
-      //    for (i <- 0 until numPartition) {
-      //      print(distribute(i) + ",")
-      //    }
-      //    println("")
-      //
-      //    println("V:")
-      //    for (i <- V) {
-      //      print(i + ",")
-      //    }
-      //    println("")
-
       V
     }
 
 
     def partition_r(
                      ss1: String,
-                     indexNum: scala.collection.Map[(Int, Int), Int],
+                     indexNum: scala.collection.Map[(Int, Boolean), Int],
+                     partitionTable: scala.collection.Map[Int, Int],
                      minimum: Int,
                      group: Array[(Int, Int)],
                      threshold: Double,
@@ -441,7 +402,7 @@ case class JaccardSelfSimilarityJoin(
       for (lrange <- range) {
         val l = lrange._1
         val isExtend = {
-          if (l == range(range.length-1)._1) {
+          if (l == range(range.length - 1)._1) {
             false
           }
           else {
@@ -455,17 +416,32 @@ case class JaccardSelfSimilarityJoin(
 
         val substring = {
           for (i <- 1 until H + 1) yield {
-            val p = ss.filter(x => x.toInt % H + 1 == i)
+            val p = ss.filter(x => x.hashCode % H + 1 == i)
             if (p.length == 0) "" else if (p.length == 1) p(0) else p.reduce(_ + " " + _)
           }
         }.toArray
 
         //      println(ss1)
-        val V = calculateVsl(s, l, indexNum, substring, H, minimum, threshold, alpha, partitionNum, topDegree)
+        val V = calculateVsl(s,
+          l,
+          indexNum,
+          partitionTable,
+          substring,
+          H,
+          minimum,
+          alpha,
+          partitionNum,
+          topDegree)
+
+        var V_Info = ""
+        for (ii <- V) {
+          V_Info += " " + ii.toString
+        }
+        logInfo(s"V_INFO: " + V_Info)
 
         for (i <- 1 until H + 1) {
-          val p = ss.filter(x => x.toInt % H + 1 == i);
-          records += Tuple2(p.map(x => x.toInt), {
+          val p = ss.filter(x => x.hashCode % H + 1 == i)
+          records += Tuple2(p.map(x => x.hashCode), {
             if (V(i - 1) == 0) Array()
             else if (V(i - 1) == 1) Array(false)
             else Array(true)
@@ -476,58 +452,27 @@ case class JaccardSelfSimilarityJoin(
         for (i <- 1 until H + 1) {
           val hash = (substring(i - 1), i, l).hashCode()
           if (V(i-1) == 1) {
+            logInfo(s"inverse: " + substring(i - 1) + " " + i.toString +
+              " " + l.toString + " " + V(i - 1))
             result1 += Tuple5(hash, false, Array(false), isExtend, i)
-            if (isExtend == false && substring(i - 1).length > 0) {
-              for (k <- createDeletion(substring(i - 1))) {
-                val hash1 = (k, i, l).hashCode()
-                result1 += Tuple5(hash1, true, Array(false), isExtend, i)
-              }
-            }
           }
           else if (V(i-1) == 2) {
+            logInfo(s"inverse: " + substring(i - 1) + " " + i.toString +
+              " " + l.toString + " " + V(i - 1))
             result1 += Tuple5(hash, false, Array(true), isExtend, i)
             if (substring(i - 1).length > 0) {
               for (k <- createDeletion(substring(i - 1))) {
+                logInfo(s"deletion: " + k + " " + i.toString +
+                  " " + l.toString + " " + V(i - 1))
                 val hash1 = (k, i, l).hashCode()
                 result1 += Tuple5(hash1, true, Array(true), isExtend, i)
-              }
-            }
-          }
-          else {
-            if (isExtend == false) {
-              result1 += Tuple5(hash, false, Array(), isExtend, i)
-              if (substring(i - 1).length > 0) {
-                for (k <- createDeletion(substring(i - 1))) {
-                  val hash1 = (k, i, l).hashCode()
-                  result1 += Tuple5(hash1, true, Array(), isExtend, i)
-                }
               }
             }
           }
         }
         result += Tuple2(records.toArray, result1.toArray)
       }
-      //    if (!hasTable) {
-      //      val H = CalculateH1(s, threshold)
-      //      val substring = {
-      //        for (i <- 1 until H + 1) yield {
-      //          val p = ss.filter(x => x.toInt % H + 1 == i);
-      //          if (p.length == 0) "".toString
-      //          else if (p.length == 1) p(0)
-      //          else p.reduce(_ + " " + _)
-      //        }
-      //      }.toArray
-      //      for (i <- 1 until H + 1) {
-      //        val hash = (substring(i - 1), i, s).hashCode()
-      //        result += Tuple4(hash, 0, 0, 0)
-      //        if (substring(i - 1).length > 0) {
-      //          for (k <- createDeletion(substring(i - 1))) {
-      //            val hash1 = (k, i, s).hashCode()
-      //            result += Tuple4(hash1, 1, 0, 0)
-      //          }
-      //        }
-      //      }
-      //    }
+
       result.toArray
       // (hash, isDeletion, V, isExtend)
     }
@@ -559,10 +504,10 @@ case class JaccardSelfSimilarityJoin(
 
 
     def sort(xs: Array[String]): Array[String] = {
-      if (xs.length <= 1)
-        xs;
-      else {
-        val pivot = xs(xs.length / 2);
+      if (xs.length <= 1) {
+        xs
+      } else {
+        val pivot = xs(xs.length / 2)
         Array.concat(
           sort(xs filter (pivot >)),
           xs filter (pivot ==),
@@ -580,10 +525,11 @@ case class JaccardSelfSimilarityJoin(
     }
 
     def min(x: Int, y: Int): Int = {
-      if (x < y)
+      if (x < y) {
         x
-      else
+      } else {
         y
+      }
     }
 
     def verify(x: Array[(Array[Int], Array[Boolean])],
@@ -660,87 +606,63 @@ case class JaccardSelfSimilarityJoin(
       }
     }
 
-    def Descartes(
-                   x: Array[((Int, Array[(Array[Int], Array[Boolean])]),
-                     Boolean, Array[Boolean], Boolean, Int)], threshold: Double
-                 ) : ArrayBuffer[(Int, Int)] = {
-      var result = ArrayBuffer[(Int, Int)]()
-
-      if (x.length == 0) {
-        return result
-      }
-
-      val pos = x(0)._5
-      val index = x
-        .filter(
-          s => !s._2 && !s._4
-        )
-        .map(x => x._1)
-        .distinct
-      val deletionIndex = x
-        .filter(s => s._2 && !s._4)
-        .map(x => x._1)
-        .distinct
-      val query1 = x
-        .filter(s => !s._2 && s._3.length == 1 && !s._3(0) && s._4)
-        .map(x => x._1)
-        .distinct
-      val query2 = x
-        .filter(s => !s._2 && s._3.length == 1 && s._3(0) && s._4)
-        .map(x => x._1)
-        .distinct
-      val query3 = x
-        .filter(s => s._2 && s._3.length == 1 && s._3(0) && s._4)
-        .map(x => x._1)
-        .distinct
-
-      for (i <- index; j <- query1
-           if {
-             val i_length = i._2.map(_._1.length).reduce(_ + _)
-             val j_length = j._2.map(_._1.length).reduce(_ + _)
-             (i_length == j_length && i._1 < j._1) || (i_length != j_length && i._1 != j._1)
-           }) {
-        logInfo(s"verify: " + i._1 + " " + j._1)
-        if (verify(i._2, j._2, threshold, pos)) {
-          result += Tuple2(i._1, j._1)
+    def compareSimilarity(query: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])]),
+      Boolean, Array[Boolean], Boolean, Int),
+                          index: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])]),
+      Boolean)): Boolean = {
+      logInfo(s"comparing " + query._1._1.toString + " and " + index._1._1.toString)
+      val pos = query._5
+      if (index._2) {
+        // it's a deletion index
+        if (!query._2 && query._3.length > 0 && query._3(0)) {
+          // query from inverse with value 2
+          if (query._1._1 != index._1._1) {
+            verify(query._1._3, index._1._3, threshold, pos)
+//            true
+          } else {
+            false
+          }
+        } else {
+          false
+        }
+      } else {
+        // it's a reverse index
+        if (!query._2 && !query._4 && query._3.length > 0) {
+          // query from inverse index with value 2 or 1
+          if (query._1._1 < index._1._1) {
+            verify(query._1._3, index._1._3, threshold, pos)
+//            true
+          } else {
+            false
+          }
+        } else if (!query._2 && query._4 && query._3.length > 0) {
+          // query from inverse query with value 2 or 1
+          if (query._1._1 != index._1._1) {
+            verify(query._1._3, index._1._3, threshold, pos)
+//            true
+          } else {
+            false
+          }
+        } else if (query._2 && !query._4 && query._3.length > 0 && query._3(0)) {
+          // query from deletion index with value 2
+          if (query._1._1 < index._1._1) {
+            verify(query._1._3, index._1._3, threshold, pos)
+//            true
+          } else {
+            false
+          }
+        } else if (query._2 && query._4 && query._3.length > 0 && query._3(0)) {
+          // query from deletion query with value 2
+          if (query._1._1 != index._1._1) {
+            verify(query._1._3, index._1._3, threshold, pos)
+//            true
+          } else {
+            false
+          }
+        } else {
+          false
         }
       }
-      //      System.gc()
-      for (i <- deletionIndex; j <- query2
-           if {
-             val i_length = i._2.map(_._1.length).reduce(_ + _)
-             val j_length = j._2.map(_._1.length).reduce(_ + _)
-             (i_length == j_length && i._1 < j._1) || (i_length != j_length && i._1 != j._1)
-           }) {
-        logInfo(s"verify: " + i._1 + " " + j._1)
-        if (verify(i._2, j._2, threshold, pos)) {
-          result += Tuple2(i._1, j._1)
-        }
-      }
-      for (i <- index; j <- query2
-           if {
-             val i_length = i._2.map(_._1.length).reduce(_ + _)
-             val j_length = j._2.map(_._1.length).reduce(_ + _)
-             (i_length == j_length && i._1 < j._1) || (i_length != j_length && i._1 != j._1)
-           }) {
-        logInfo(s"verify: " + i._1 + " " + j._1)
-        if (verify(i._2, j._2, threshold, pos)) {
-          result += Tuple2(i._1, j._1)
-        }
-      }
-      for (i <- index; j <- query3
-           if {
-             val i_length = i._2.map(_._1.length).reduce(_ + _)
-             val j_length = j._2.map(_._1.length).reduce(_ + _)
-             (i_length == j_length && i._1 < j._1) || (i_length != j_length && i._1 != j._1)
-           }) {
-        logInfo(s"verify: " + i._1 + " " + j._1)
-        if (verify(i._2, j._2, threshold, pos)) {
-          result += Tuple2(i._1, j._1)
-        }
-      }
-      // println(result.length)
-      result
     }
 
     def multigroup(mini: Int, maxi: Int, threshold: Double, alpha : Double): Array[(Int, Int)] = {
@@ -754,18 +676,31 @@ case class JaccardSelfSimilarityJoin(
       result.toArray
     }
 
+    def choosePartition(frequency: Int): Int = {
+      var min = Long.MaxValue
+      var partitionId = -1
+      for ((i, id) <- indexDistribute.slice(0, num_partitions).zipWithIndex) {
+        if (i < min) {
+          min = i
+          partitionId = id
+        }
+      }
+      indexDistribute(partitionId) += frequency
+      partitionId
+    }
+
     val left_rdd = left.execute().map(row =>
     {
-      try {
-        row.getString(0)
-      } catch {
-        case e: NullPointerException => ""
-        case _ => ""
-      }
-    }).filter(x => (x.length > 0))
+      val key = BindReferences
+        .bindReference(leftKeys, left.output)
+        .eval(row)
+        .asInstanceOf[org.apache.spark.unsafe.types.UTF8String]
+        .toString
+      (key, row.copy())
+    })
 
     val rdd1 = left_rdd
-      .map(x => (x.split(" ").size))
+      .map(x => (x._1.split(" ").size))
       .persist(StorageLevel.DISK_ONLY)
     val minimum = sparkContext.broadcast(rdd1.min())
     val maximum = sparkContext.broadcast(rdd1.max())
@@ -779,63 +714,129 @@ case class JaccardSelfSimilarityJoin(
       + count.value.toString)
     val record = left_rdd
       // .filter(x => {val l = x.split(" "); l.length < 500 && l(0).length > 0})*/
-      .map(x => sortByValue(x))
+      .map(x => (sortByValue(x._1), x._2))
       .distinct
       .persist(StorageLevel.DISK_ONLY)
     // .map(x => mapTokenToId(tokenMapId.value, x))
     val multiGroup = sparkContext.broadcast(multigroup(minimum.value, maximum.value, threshold, alpha))
+
     val recordidMapSubstring = record
       .map(x => {
-        logInfo(s"" + x)
-        val inverse = createInverse(x, multiGroup.value, threshold)
-        ((x.hashCode,
-          inverse.map(s => (s._1.split(" ").map(ss => ss.hashCode), Array(false)))), inverse)
+        ((x._1, x._2), createInverse(x._1, multiGroup.value, threshold))
       })
       .flatMapValues(x => x)
-      .map(x => (x._2._1, (x._1, x._2._2, x._2._3)))
-      .map(x => (x._2, x._1))
-      .persist(StorageLevel.DISK_ONLY)
-    // (1,i,l), substring
+      .map(x => ((x._1, x._2._2, x._2._3), x._2._1))
+
     val deletionMapRecord = recordidMapSubstring
       .filter(x => (x._2.length > 0))
-      .flatMapValues(x => createDeletion(x)) // (string,i,l), deletionSubstring
-      .map(x => ((x._2, x._1._2, x._1._3), x._1._1))
-      .persist(StorageLevel.DISK_ONLY)// ((deletionSubstring, i, l), string)
+      .map(x => (x._1, createDeletion(x._2))) // (1,i,l), deletionSubstring
+      .flatMapValues(x => x)
+      .map(x => {
+        //        println(s"deletion index: " + x._2 + " " + x._1._2 + " " + x._1._3)
+        ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, true))
+      })
+    // (hashCode, (String, internalrow))
+
     val inverseMapRecord = recordidMapSubstring
-        .map(x => ((x._2, x._1._2, x._1._3), x._1._1))
-        .persist(StorageLevel.DISK_ONLY)// ((inverseSubstring, i, l), string)
-    val indexNum = sparkContext.broadcast(
-        inverseMapRecord
-          .map(x => ((x._1.hashCode, 0), 1))
-          .union(deletionMapRecord.map(x => ((x._1.hashCode(), 1), 1)))
-          .reduceByKey(_ + _)
-          .filter(x => (x._2 > 2))
-          .collectAsMap()
-      )
-    recordidMapSubstring.unpersist()
+      .map(x => {
+        //        println(s"inverse index: " + x._2 + " " + x._1._2 + " " + x._1._3)
+        ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, false))
+      })
+
+    val index = deletionMapRecord.union(inverseMapRecord).persist(StorageLevel.DISK_ONLY)
+
+    val f = index
+      .map(x => ((x._1, x._2._2), 1))
+      .reduceByKey(_ + _)
+      .filter(x => x._2 > abandonNum)
+      .persist()
+
+    val frequencyTable = sparkContext.broadcast(
+      f
+        .map(x => (x._1, x._2))
+        .collectAsMap()
+    )
+    val partitionTable = sparkContext.broadcast(
+      f
+        .map(x => (x._1._1, x._2))
+        .reduceByKey(_ + _)
+        .mapValues(choosePartition(_))
+        .collectAsMap()
+    )
+
+    val indexPartitionedRDD = new SimilarityRDD(index
+      .partitionBy(new SimilarityHashPartitioner(num_partitions, partitionTable.value)), true)
+
+    val index_rdd_indexed = indexPartitionedRDD.mapPartitions(iter => {
+      val data = iter.toArray
+      val index = JaccardIndex(data,
+        threshold, frequencyTable, multiGroup, minimum.value, alpha, num_partitions)
+      Array(IPartition(index,
+        data.
+          map(x => (((x._2._1._1.hashCode,
+            x._2._1._2,
+            createInverse(x._2._1._1, multiGroup.value, threshold)
+              .map(x => (x._1.split(" ").map(s => s.hashCode), Array[Boolean]()))),
+            x._2._2))))).iterator
+    }).persist(StorageLevel.MEMORY_AND_DISK_SER)
+
+    index_rdd_indexed.count
 
     val query_rdd = record
-      .map(x => (x.hashCode,
+      .map(x => ((x._1.hashCode, x._2),
         partition_r(
-          x, indexNum.value, minimum.value, multiGroup.value,
+          x._1, frequencyTable.value, partitionTable.value, minimum.value, multiGroup.value,
           threshold, alpha, num_partitions, topDegree
         )))
       // (id, Array(String, Array(subid, isDeletion, V, isExtend, i)))
       .flatMapValues(x => x)
-      .map(x => ((x._1, x._2._1), x._2._2))
+      .map(x => ((x._1._1, x._1._2, x._2._1), x._2._2))
       .flatMapValues(x => x)
       .map(x => (x._2._1, (x._1, x._2._2, x._2._3, x._2._4, x._2._5)))
-      .persist(StorageLevel.DISK_ONLY)
+    // (key, (String, (id, InternalRow), isDeletion, V, isExtend, i))
 
-    query_rdd
-      .groupByKey(new SimilarityHashPartitioner(num_partitions))
-      .map(x => (x._1, x._2.toArray))
-      .filter(x => x._2.length > 1)
-      .flatMap(x => { Descartes(x._2, threshold) } )
-      .map(x => InternalRow.
-        fromSeq(Seq(org.apache.spark.unsafe.types.UTF8String.fromString(x._1.toString),
-          org.apache.spark.unsafe.types.UTF8String.fromString(x._2.toString))))
-    // logInfo(result)
+    val rdd_partitioned = query_rdd
+      .partitionBy(new SimilarityHashPartitioner(num_partitions, partitionTable.value))
+
+    // Global Index
+    val query_rdd_partitioned = rdd_partitioned
+      .filter(x => (x._2._3.length > 0 && (x._2._3(0) || (!x._2._3(0) && !x._2._2))))
+      .persist(StorageLevel.MEMORY_AND_DISK_SER)
+
+    // construct index ahead of time
+    query_rdd_partitioned.count
+
+    query_rdd_partitioned.zipPartitions(index_rdd_indexed, true) {
+        (leftIter, rightIter) => {
+          // logInfo(leftIter.length.toString())
+          val ans = mutable.ListBuffer[(InternalRow, InternalRow)]()
+          val index = rightIter.next
+          var countNum = 0.toLong
+          while (leftIter.hasNext) {
+            val q = leftIter.next
+            logInfo(s"enter in findSimilarity")
+            // this is the partition which I want to search
+            val candidate = index.index.asInstanceOf[JaccardIndex].index.getOrElse(q._1, List())
+            for (i <- candidate) {
+              val data = index.data(i)
+              if (compareSimilarity(q._2, data)) {
+                logInfo(s"success")
+//                countNum += 1
+                ans += Tuple2(q._2._1._2, data._1._2)
+              } else {
+                logInfo(s"failed")
+              }
+            }
+          }
+//          ans += InternalRow.
+//            fromSeq(Seq(
+//              org.apache.spark.unsafe.types.UTF8String.fromString(countNum.toString),
+//              org.apache.spark.unsafe.types.UTF8String.fromString("verification num")
+//            ))
+//          ans.iterator
+          ans.map(x => new JoinedRow(x._1, x._2)).iterator
+        }
+    }
   }
 }
 

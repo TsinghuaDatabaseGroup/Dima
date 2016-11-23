@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.SimilarityPrompt
+package org.apache.spark.sql.SimilarityProbe
 
 /**
   * Created by sunji on 16/10/15.
@@ -45,18 +45,18 @@ object JaccardSimSegmentation {
   }
   private[sql] def inverseDel (
                    xi: String,
-                   indexNum: scala.collection.Map [ ( Int, Boolean ), Int ],
+                   indexNum: scala.collection.Map[(Int, Boolean), Long],
                    ii: Int,
                    ll: Int,
                    minimum: Int
-                 ): Int = {
-    var total = 0
+                 ): Long = {
+    var total = 0L
     if (xi.length == 0) {
-      return 0
+      return 0L
     }
     for (i <- createDeletion(xi)) {
       val hash = (i, ii, ll).hashCode()
-      total = total + indexNum.getOrElse((hash, false), 0)
+      total = total + indexNum.getOrElse((hash, false), 0L)
     }
     total
   }
@@ -94,7 +94,7 @@ object JaccardSimSegmentation {
 
   private def right_child(i: Int) = 2 * i + 1
 
-  private def compare(x: Int, y: Int) : Short = {
+  private def compare(x: Long, y: Long) : Short = {
     if (x > y) {
       1
     } else if (x < y) {
@@ -104,8 +104,8 @@ object JaccardSimSegmentation {
     }
   }
 
-  private def minHeapify(A: Array[(Int, Int, Int)], i: Int):
-  Array[(Int, Int, Int)] = {
+  private def minHeapify(A: Array[(Int, Long, Int)], i: Int):
+  Array[(Int, Long, Int)] = {
     val l = left_child(i)
     val r = right_child(i)
     val AA = A.clone()
@@ -136,8 +136,8 @@ object JaccardSimSegmentation {
   }
 
   private def heapExtractMin(
-                              A: Array[(Int, Int, Int)]
-                            ): Tuple2[Tuple3[Int, Int, Int], Array[(Int, Int, Int)]] = {
+                              A: Array[(Int, Long, Int)]
+                            ): Tuple2[Tuple3[Int, Long, Int], Array[(Int, Long, Int)]] = {
     val heapSize = A.length
     if (heapSize < 1) {
       println(s"heap underflow")
@@ -149,10 +149,10 @@ object JaccardSimSegmentation {
   }
 
   private def heapIncreaseKey(
-                               A: Array[(Int, Int, Int)],
+                               A: Array[(Int, Long, Int)],
                                i: Int,
-                               key: Tuple3[Int, Int, Int]
-                             ): Array[(Int, Int, Int)] = {
+                               key: Tuple3[Int, Long, Int]
+                             ): Array[(Int, Long, Int)] = {
     if (compare(key._2, A(i - 1)._2) > 0) {
       println(s"new key is larger than current Key")
     }
@@ -169,14 +169,14 @@ object JaccardSimSegmentation {
   }
 
   private def minHeapInsert(
-                             A: Array[(Int, Int, Int)],
-                             key: Tuple3[Int, Int, Int]
-                           ): Array[(Int, Int, Int)] = {
-    val AA = Array.concat(A, Array(key).map(x => (x._1, Int.MaxValue, x._3)))
+                             A: Array[(Int, Long, Int)],
+                             key: Tuple3[Int, Long, Int]
+                           ): Array[(Int, Long, Int)] = {
+    val AA = Array.concat(A, Array(key).map(x => (x._1, Long.MaxValue, x._3)))
     heapIncreaseKey(AA, AA.length, key)
   }
 
-  private def buildMinHeap(A: Array[(Int, Int, Int)]): Array[(Int, Int, Int)] = {
+  private def buildMinHeap(A: Array[(Int, Long, Int)]): Array[(Int, Long, Int)] = {
     var AA = A.clone()
     for (i <- (1 until Math.floor(AA.length / 2).toInt + 1).reverse) {
       AA = minHeapify(AA, i)
@@ -186,7 +186,7 @@ object JaccardSimSegmentation {
   def calculateVsl(
                     s: Int,
                     l: Int,
-                    indexNum: scala.collection.Map[(Int, Boolean), Int],
+                    indexNum: scala.collection.Map[(Int, Boolean), Long],
                     substring: Array[String],
                     H: Int,
                     minimum: Int,
@@ -197,20 +197,20 @@ object JaccardSimSegmentation {
 
     val C0 = {
       for (i <- 1 until H + 1) yield {
-        0
+        0L
       }
     }.toArray
     val C1 = {
       for (i <- 1 until H + 1) yield {
         val key = ((substring(i - 1), i, l).hashCode(), false)
-        indexNum.getOrElse(key, 0)
+        indexNum.getOrElse(key, 0L)
       }
     }.toArray
     val C2 = {
       for (i <- 1 until H + 1) yield {
         val key = ((substring(i - 1), i, l).hashCode(), true)
         C1(i - 1) +
-          indexNum.getOrElse(key, 0) +
+          indexNum.getOrElse(key, 0L) +
           inverseDel(substring(i - 1), indexNum, i, l, minimum)
       }
     }.toArray
@@ -255,7 +255,7 @@ object JaccardSimSegmentation {
 
   private[sql] def partition_r(
                    ss1: String,
-                   indexNum: scala.collection.Map[(Int, Boolean), Int],
+                   indexNum: scala.collection.Map[(Int, Boolean), Long],
                    minimum: Int,
                    group: Array[(Int, Int)],
                    threshold: Double,
@@ -270,7 +270,7 @@ object JaccardSimSegmentation {
     var ss = ss1.split(" ")
     val s = ss.size
     val range = group
-      .filter(x => !(x._1 > Math.floor(s / threshold).toInt || x._2 < (Math.ceil(threshold * s) + 0.0001).toInt) )
+      .filter(x => !(x._1 > Math.floor(s / threshold).toInt || x._2 < (Math.ceil(threshold * s) + 0.0001).toInt))
     for (lrange <- range) {
       val l = lrange._1
       val isExtend = {
