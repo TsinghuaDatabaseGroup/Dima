@@ -21,6 +21,7 @@ import org.apache.spark.Logging
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.types.DoubleType
 
 /**
  * A pattern that matches any number of project or filter operations on top of another relational
@@ -175,7 +176,7 @@ object ExtractSpatialJoinKeys extends Logging with PredicateHelper {
 }
 
 object ExtractSimilarityJoinKeys extends Logging with PredicateHelper {
-  type ReturnType = (Seq[Expression], Seq[Expression], Literal, JoinType, LogicalPlan, LogicalPlan)
+  type ReturnType = (String, Expression, Expression, Literal, JoinType, LogicalPlan, LogicalPlan)
 
   def unapply(plan: LogicalPlan): Option[ReturnType] = {
     logInfo(s"ExtractSimilarityJoinKeys")
@@ -183,30 +184,28 @@ object ExtractSimilarityJoinKeys extends Logging with PredicateHelper {
       case Join(left, right, SimilarityJoin, condition) =>
 //        val children = condition.get.children
 //        val k = children.last.asInstanceOf[Literal]
-        var left_keys = Seq[Expression]()
-        var right_keys = Seq[Expression]()
-
-        val r =
-        if (!condition.isEmpty) {
-          val children = condition.get.children
-          val len = (children.length - 1) >> 1
-          for (i <- 0 until len) {
-            right_keys = right_keys :+ children(i)
-            left_keys = left_keys :+ children(len + i)
+        var left_keys: Expression = null
+        var right_keys: Expression = null
+        var measure = "Jaccard"
+        val r = {
+          if (!condition.isEmpty) {
+            val children = condition.get.children
+            left_keys = children(0)
+            right_keys = children(1)
+            measure = children(3).asInstanceOf[Literal].toString
+            children(2).asInstanceOf[Literal]
+          } else {
+            Literal(0.8)
           }
-          children.last.asInstanceOf[Literal]
-        } else {
-          Literal(0.8)
         }
-//        val k = Literal(0.8)
-        Some((left_keys, right_keys, r, SimilarityJoin, left, right))
+        Some((measure, left_keys, right_keys, r, SimilarityJoin, left, right))
       case _ => None
     }
   }
 }
 
 object ExtractSelfSimilarityJoinKeys extends Logging with PredicateHelper {
-  type ReturnType = (Literal, JoinType, LogicalPlan, LogicalPlan)
+  type ReturnType = (Expression, Expression, Literal, JoinType, LogicalPlan, LogicalPlan)
 
   def unapply(plan: LogicalPlan): Option[ReturnType] = {
     logInfo(s"ExtractSelfSimilarityJoinKeys")
@@ -214,8 +213,19 @@ object ExtractSelfSimilarityJoinKeys extends Logging with PredicateHelper {
       case Join(left, right, SelfSimilarityJoin, condition) =>
         //        val children = condition.get.children
         //        val k = children.last.asInstanceOf[Literal]
-        val k = Literal(0.8)
-        Some((k, SelfSimilarityJoin, left, right))
+        var left_keys: Expression = null
+        var right_keys: Expression = null
+
+        var r: Literal = null
+        if (!condition.isEmpty) {
+          val children = condition.get.children
+          left_keys = children(0)
+          right_keys = children(1)
+          r = children.last.asInstanceOf[Literal]
+        } else {
+          Literal(0.8)
+        }
+        Some((left_keys, right_keys, r, SelfSimilarityJoin, left, right))
       case _ => None
     }
   }

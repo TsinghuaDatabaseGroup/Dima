@@ -23,7 +23,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.util.NumberConverter
 import org.apache.spark.sql.execution.LeafNode
 import org.apache.spark.sql.spatial._
-import org.apache.spark.sql.SimilarityPrompt._
+import org.apache.spark.sql.SimilarityProbe.{EdSimSegmentation, JaccardSimSegmentation}
 
 import scala.collection.mutable
 
@@ -269,7 +269,6 @@ private[sql] case class IndexedRelationScan(
                   column_keys.map(x => BindReferences.bindReference(x, relation.output)
                     .eval(row).asInstanceOf[Number].doubleValue()).toArray
                 )
-
                 val contain = cir_ranges.forall(x => tmp_point.minDist(x._1) <= x._2)
                 contain && queryMBR.contains(tmp_point)
               }
@@ -285,12 +284,13 @@ private[sql] case class IndexedRelationScan(
             exps.foreach {
               case JaccardSimilarity(string: Expression, target: Literal, delta: Literal) =>
                 val eval_target = target.value.toString
-                val eval_delta = delta.value.asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
+                val eval_delta =
+                  delta.value.asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
                 jaccardSimilarity1 = jaccardSimilarity1 :+(eval_target, eval_delta)
             }
             assert(jaccardSimilarity1.length == 1)
             val target = jaccardSimilarity1.head._1
-            val delta = jaccardSimilarity1.head._2
+            val delta = jaccardSimilarity1.head._2.toDouble
             val global = sqlContext.indexManager.getIndexGlobalInfo(0)
 //            println(s"globalInfo in IndexedRelationScan is $global")
             val partitionedQuery = JaccardSimSegmentation.partition_r(
@@ -298,7 +298,8 @@ private[sql] case class IndexedRelationScan(
               global.frequencyTable.value,
               global.minimum,
               global.multiGroup.value,
-              global.threshold,
+              global.threshold_base,
+              delta,
               global.alpha,
               global.partitionNum
             )
@@ -307,16 +308,70 @@ private[sql] case class IndexedRelationScan(
                 val packed = partitionData.next()
                 val index = packed.index.asInstanceOf[JaccardIndex]
                 if (index != null) {
-                  index.findIndex(packed.data,
-                    partitionedQuery.map(x => (x._1, x._2
-                      .filter(x => JaccardSimSegmentation.sendLocation(x._1,
-                        global.partitionNum) == partitionId))),
-                    delta.toDouble)
-                    .iterator
+                  val sendOut = partitionedQuery.map(x => (x._1, x._2
+                    .filter(x => JaccardSimSegmentation.sendLocation(x._1,
+                      global.partitionNum) == partitionId))).filter(x => x._2.length != 0)
+                  if (sendOut.length == 0) {
+                    Array[InternalRow]().iterator
+                  } else {
+                    index.findIndex(packed.data,
+                      sendOut,
+                      delta.toDouble)
+                      .iterator
+                  }
                 } else Array[InternalRow]().iterator
               })
           }.reduce((a, b) => a.union(b)).map(_.copy()).distinct()
         } else jaccardSimilarity.indexRDD.flatMap(_.data.map(x => (x._1._2)))
+      case edSimilarity @ EdIndexIndexedRelation(_, _, _, column_keys, _) =>
+        if (predicates.nonEmpty) {
+          predicates.map { predicate =>
+            val exps = splitConjunctivePredicates(predicate)
+            var edSimilarity1 = Array[(String, Int)]()
+            exps.foreach {
+              case EdSimilarity(string: Expression, target: Literal, delta: Literal) =>
+                val eval_target = target.value.toString
+                val eval_delta =
+                  delta.value.asInstanceOf[java.lang.Integer].toInt
+                edSimilarity1 = edSimilarity1 :+(eval_target, eval_delta)
+            }
+            assert(edSimilarity1.length == 1)
+            val target = edSimilarity1.head._1
+            val delta = edSimilarity1.head._2.toInt
+            val global = sqlContext.indexManager.getEdIndexGlobalInfo(0)
+            //            println(s"globalInfo in IndexedRelationScan is $global")
+            val partitionedQuery = EdSimSegmentation.parts(
+              target,
+              global.frequencyTable.value,
+              global.L.value,
+              global.P.value,
+              global.threshold,
+              delta,
+              global.partitionNum,
+              global.topDegree,
+              global.weight,
+              global.max
+            )
+            edSimilarity.indexRDD.mapPartitionsWithIndex(
+              (partitionId, partitionData) => {
+                val packed = partitionData.next()
+                val index = packed.index.asInstanceOf[EdIndex]
+                if (index != null) {
+                  val sendOut = partitionedQuery
+                    .filter(
+                      x => EdSimSegmentation.sendLocation(x._1, global.partitionNum) == partitionId)
+                  if (sendOut.length == 0) {
+                    Array[InternalRow]().iterator
+                  } else {
+                    index.findIndex(packed.data,
+                      sendOut,
+                      delta.toInt)
+                      .iterator
+                  }
+                } else Array[InternalRow]().iterator
+              })
+          }.reduce((a, b) => a.union(b)).map(_.copy()).distinct()
+        } else edSimilarity.indexRDD.flatMap(_.data.map(x => x.content))
       case other =>
         other.indexedRDD.flatMap(_.data)
     }

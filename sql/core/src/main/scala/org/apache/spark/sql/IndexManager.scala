@@ -45,11 +45,21 @@ case class IndexInfo(tableName: String, indexName: String,
                      location: String, storageLevel: StorageLevel) extends Serializable
 
 case class IndexGlobalInfo(threshold: Double,
-                           frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Int]],
+                           frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
                            multiGroup: Broadcast[Array[(Int, Int)]],
                            minimum: Int,
                            alpha: Double,
-                           partitionNum: Int) extends Serializable
+                           partitionNum: Int,
+                           threshold_base: Double) extends Serializable
+
+case class EdIndexGlobalInfo(threshold: Int,
+                           frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
+                           minimum: Int,
+                           partitionNum: Int,
+                           P: Broadcast[scala.collection.mutable.Map[(Int, Int), Int]],
+                           L: Broadcast[scala.collection.mutable.Map[(Int, Int), Int]],
+                           topDegree: Int,
+                           weight: Array[Int], max: Int) extends Serializable
 
 private[sql] class IndexManager extends Logging {
   @transient
@@ -64,6 +74,9 @@ private[sql] class IndexManager extends Logging {
   @transient
   private val indexGlobalInfos = new ArrayBuffer[IndexGlobalInfo]
 
+  @transient
+  private val EdIndexGlobalInfos = new ArrayBuffer[EdIndexGlobalInfo]
+
   def getIndexInfo: Array[IndexInfo] = indexInfos.toArray
 
   def getIndexData: Array[IndexedData] = indexedData.toArray
@@ -71,12 +84,29 @@ private[sql] class IndexManager extends Logging {
   def getIndexGlobalInfo: Array[IndexGlobalInfo] = indexGlobalInfos.toArray
 
   def addIndexGlobalInfo(threshold: Double,
-                         frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Int]],
+                         frequencyTable:
+                          Broadcast[scala.collection.Map[(Int, Boolean), Long]],
                          multiGroup: Broadcast[Array[(Int, Int)]],
                          minimum: Int,
                          alpha: Double,
-                         partitionNum: Int): Unit = {
-    indexGlobalInfos += IndexGlobalInfo(threshold, frequencyTable, multiGroup, minimum, alpha, partitionNum)
+                         partitionNum: Int, threshold_base: Double): Unit = {
+    indexGlobalInfos += IndexGlobalInfo(threshold,
+      frequencyTable, multiGroup, minimum, alpha, partitionNum, threshold_base)
+  }
+
+  def getEdIndexGlobalInfo: Array[EdIndexGlobalInfo] = EdIndexGlobalInfos.toArray
+
+  def addEdIndexGlobalInfo(threshold: Int,
+                         frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
+                         minimum: Int,
+                         partitionNum: Int,
+                         P: Broadcast[scala.collection.mutable.Map[(Int, Int), Int]],
+                         L: Broadcast[scala.collection.mutable.Map[(Int, Int), Int]],
+                         topDegree: Int,
+                         weight: Array[Int],
+                         max: Int): Unit = {
+    EdIndexGlobalInfos += EdIndexGlobalInfo(threshold,
+      frequencyTable, minimum, partitionNum, P, L, topDegree, weight, max)
   }
 
   private def readLock[A](f: => A): A = {

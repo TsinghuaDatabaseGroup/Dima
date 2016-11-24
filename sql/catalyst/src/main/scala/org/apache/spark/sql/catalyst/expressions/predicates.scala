@@ -320,6 +320,37 @@ case class InKNN(point: Seq[Expression],
 
 object JaccardSimilarity {
   def jaccardSimilarity(s1: String, s2: String, delta: Int = 10000): Double = {
+    val overlap = (s1.split(" ").intersect(s2.split(" "))).length
+    overlap.toDouble / (s1.length + s2.length - overlap).toDouble
+  }
+  def apply(s1: String, s2: String): Double = jaccardSimilarity(s1, s2)
+}
+
+case class JaccardSimilarity(string: Expression,
+                        target: Expression,
+                        delta: Literal) extends Predicate with CodegenFallback {
+//  require(delta.dataType.isInstanceOf[DoubleType])
+
+  override def children: Seq[Expression] =
+    Seq(string, target, delta, Literal("Jaccard"))
+
+  override def nullable: Boolean = false
+
+  override def toString: String = s" **($string) IN JACCARD SIMILARITY ($target) within ($delta)"
+
+  /** Returns the result of evaluating this expression on a given input Row */
+  override def eval(input: InternalRow): Any = {
+    val eval_string = string.eval(input).toString
+    val eval_target = target.eval(input).toString
+    val eval_delta = delta.value.asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
+
+//    JaccardSimilarity.jaccardSimilarity(eval_string, eval_target) <= eval_delta
+    true
+  }
+}
+
+object EdSimilarity {
+  def edSimilarity(s1: String, s2: String, delta: Int = 10000): Int = {
     if (math.abs(s1.length - s2.length) > delta) {
       return (delta + 1)
     }
@@ -335,27 +366,28 @@ object JaccardSimilarity {
     dist(s2.length)(s1.length)
   }
 
-  def apply(s1: String, s2: String): Double = jaccardSimilarity(s1, s2)
+  def apply(s1: String, s2: String): Double = edSimilarity(s1, s2)
 }
 
-case class JaccardSimilarity(string: Expression,
-                        target: Expression,
-                        delta: Literal) extends Predicate with CodegenFallback {
-//  require(delta.dataType.isInstanceOf[DoubleType])
+case class EdSimilarity(string: Expression,
+                             target: Expression,
+                             delta: Literal) extends Predicate with CodegenFallback {
+  //  require(delta.dataType.isInstanceOf[DoubleType])
 
-  override def children: Seq[Expression] = Seq(string, target, delta)
+  override def children: Seq[Expression] =
+    Seq(string, target, delta, Literal("EditDistance"))
 
   override def nullable: Boolean = false
 
-  override def toString: String = s" **($string) IN JACCARD SIMILARITY ($target) within ($delta)"
+  override def toString: String = s" **($string) IN ED SIMILARITY ($target) within ($delta)"
 
   /** Returns the result of evaluating this expression on a given input Row */
   override def eval(input: InternalRow): Any = {
     val eval_string = string.eval(input).toString
     val eval_target = target.eval(input).toString
-    val eval_delta = delta.value.asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
+    val eval_delta = delta.value.asInstanceOf[java.lang.Integer].toInt
 
-//    JaccardSimilarity.jaccardSimilarity(eval_string, eval_target) <= eval_delta
+    //    JaccardSimilarity.jaccardSimilarity(eval_string, eval_target) <= eval_delta
     true
   }
 }

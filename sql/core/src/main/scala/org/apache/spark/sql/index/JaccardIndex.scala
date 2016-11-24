@@ -28,7 +28,7 @@ import org.apache.spark.broadcast.Broadcast
 import scala.collection.mutable
 
 
-case class Extra(frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Int]],
+case class Extra(frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
   multiGroup: Broadcast[Array[(Int, Int)]], minimum: Int, alpha: Double, partitionNum: Int)
 
 class JaccardIndex() extends Index with Serializable {
@@ -128,7 +128,6 @@ class JaccardIndex() extends Index with Serializable {
     val pos = query._5
     if ((query._3.length > 0 && query._3(0)) ||
       (query._3.length > 0 && !query._3(0) && !index._2)) {
-//      println(s"Begin Verification")
       verify(query._1, index._1, threshold, pos)
     } else {
       false
@@ -178,7 +177,7 @@ class JaccardIndex() extends Index with Serializable {
   }
 
   def init(threshold: Double,
-    frequencyT: Broadcast[scala.collection.Map[(Int, Boolean), Int]],
+    frequencyT: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
     multiG: Broadcast[Array[(Int, Int)]],
     minimum: Int,
     alpha: Double,
@@ -191,7 +190,7 @@ class JaccardIndex() extends Index with Serializable {
     index += (key -> (position :: index.getOrElse(key, List())))
   }
 
-  def findIndex(data: Array[((String, InternalRow), Boolean)],
+  def findIndex(data: Array[((Int, InternalRow, Array[(Array[Int], Array[Boolean])]), Boolean)],
                 key: Array[(Array[(Array[Int], Array[Boolean])],
                   Array[(Int, Boolean, Array[Boolean], Boolean, Int)])],
                 t: Double): Array[InternalRow] = {
@@ -204,8 +203,7 @@ class JaccardIndex() extends Index with Serializable {
         for (p <- position) {
 //          println(s"Found in Index")
           val que = (query._1, i._2, i._3, i._4, i._5)
-          val Ind = (createInverse(sortByValue(data(p)._1._1), extra.multiGroup.value, threshold)
-            .map(x => (x._1.split(" ").map(s => s.hashCode), Array[Boolean]())), data(p)._2)
+          val Ind = (data(p)._1._3, data(p)._2)
           if (compareSimilarity(que, Ind)) {
             ans += data(p)._1._2
           }
@@ -219,7 +217,7 @@ class JaccardIndex() extends Index with Serializable {
 object JaccardIndex {
   def apply(data: Array[(Int, ((String, InternalRow), Boolean))],
             threshold: Double,
-            frequencyT: Broadcast[scala.collection.Map[(Int, Boolean), Int]],
+            frequencyT: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
             multiG: Broadcast[Array[(Int, Int)]],
             minimum: Int,
             alpha: Double,

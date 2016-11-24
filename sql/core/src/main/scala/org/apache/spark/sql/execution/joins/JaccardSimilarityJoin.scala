@@ -35,10 +35,10 @@ import scala.collection.mutable.ArrayBuffer
 
 
 case class JaccardSimilarityJoin(leftKeys: Expression,
-                                       rightKeys: Expression,
-                                       l: Literal,
-                                       left: SparkPlan,
-                                       right: SparkPlan) extends BinaryNode {
+                                     rightKeys: Expression,
+                                     l: Literal,
+                                     left: SparkPlan,
+                                     right: SparkPlan) extends BinaryNode {
   override def output: Seq[Attribute] = left.output ++ right.output
 
   final val num_partitions = sqlContext.conf.numSimilarityPartitions
@@ -46,23 +46,21 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
   final val alpha = sqlContext.conf.similarityMultigroupThreshold
   final val topDegree = sqlContext.conf.similarityBalanceTopDegree
   final val abandonNum = sqlContext.conf.similarityFrequencyAbandonNum
-  final val tradeOff = sqlContext.conf.similarityTradeOff
   final val weight = sqlContext.conf.similarityMaxWeight.split(",").map(x => x.toInt)
   final val partitionNumToBeSent = sqlContext.conf.partitionNumToBeSent
 
   val distribute = new Array[Long](2048)
   val indexDistribute = new Array[Long](2048)
 
-  private def CalculateH(l: Int, s: Int, threshold: Double): Int = {
+  private[sql] def CalculateH(l: Int, s: Int, threshold: Double): Int = {
     Math.floor((1 - threshold) * (l + s) / (1 + threshold) + 0.0001).toInt + 1
   }
 
-  private def CalculateH1(l: Int, threshold: Double): Int = {
-    // 生成分段的段数(按照query长度)
+  private[sql] def CalculateH1(l: Int, threshold: Double): Int = {
     Math.floor((1 - threshold) * l / threshold + 0.0001).toInt + 1
   }
 
-  private def createDeletion(ss1: String): Array[String] = {
+  private[sql] def createDeletion(ss1: String): Array[String] = {
     {
       val ss = ss1.split(" ")
       if (ss.length == 1) {
@@ -77,13 +75,13 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     }
   }
 
-  private def inverseDel(
-                  xi: String,
-                  indexNum: scala.collection.Map[(Int, Boolean), Long],
-                  ii: Int,
-                  ll: Int,
-                  minimum: Int
-                ): Long = {
+  private[sql] def inverseDel(
+                          xi: String,
+                          indexNum: scala.collection.Map[(Int, Boolean), Long],
+                          ii: Int,
+                          ll: Int,
+                          minimum: Int
+                        ): Long = {
     var total = 0.toLong
     if (xi.length == 0) {
       return 0.toLong
@@ -95,15 +93,15 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     total
   }
 
-  private def addToMapForInverseDel(
-                             xi: String,
-                             indexNum: scala.collection.Map[(Int, Boolean), Long],
-                             partitionTable: scala.collection.Map[Int, Int],
-                             ii: Int,
-                             ll: Int,
-                             minimum: Int,
-                             numPartition: Int
-                           ): Array[(Int, Long)] = {
+  private[sql] def addToMapForInverseDel(
+                                     xi: String,
+                                     indexNum: scala.collection.Map[(Int, Boolean), Long],
+                                     partitionTable: scala.collection.Map[Int, Int],
+                                     ii: Int,
+                                     ll: Int,
+                                     minimum: Int,
+                                     numPartition: Int
+                                   ): Array[(Int, Long)] = {
     if (xi.length == 0) {
       return Array[(Int, Long)]()
     }
@@ -116,13 +114,13 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     result.toArray
   }
 
-  private def parent(i: Int) = Math.floor(i / 2).toInt
+  private[sql] def parent(i: Int) = Math.floor(i / 2).toInt
 
-  private def left_child(i: Int) = 2 * i
+  private[sql] def left_child(i: Int) = 2 * i
 
-  private def right_child(i: Int) = 2 * i + 1
+  private[sql] def right_child(i: Int) = 2 * i + 1
 
-  private def compare(x: (Long, Long), y: (Long, Long)): Short = {
+  private[sql] def compare(x: (Long, Long), y: (Long, Long)): Short = {
     if (x._1 > y._1) {
       1
     } else if (x._1 < y._1) {
@@ -138,7 +136,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     }
   }
 
-  private def minHeapify(A: Array[(Int, (Long, Long), Int)],
+  private[sql] def minHeapify(A: Array[(Int, (Long, Long), Int)],
                          i: Int): Array[(Int, (Long, Long), Int)] = {
     val l = left_child(i)
     val r = right_child(i)
@@ -169,9 +167,9 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     }
   }
 
-  private def heapExtractMin(
-                      A: Array[(Int, (Long, Long), Int)]
-                    ): Tuple2[Tuple3[Int, (Long, Long), Int], Array[(Int, (Long, Long), Int)]] = {
+  private[sql] def heapExtractMin(
+                              A: Array[(Int, (Long, Long), Int)]
+                            ): ((Int, (Long, Long), Int), Array[(Int, (Long, Long), Int)]) = {
     val heapSize = A.length
     if (heapSize < 1) {
       //      logInfo(s"heap underflow")
@@ -182,13 +180,13 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     Tuple2(min, minHeapify(AA.slice(0, heapSize - 1), 1))
   }
 
-  private def heapIncreaseKey(
-                       A: Array[(Int, (Long, Long), Int)],
-                       i: Int,
-                       key: Tuple3[Int, (Long, Long), Int]
-                     ): Array[(Int, (Long, Long), Int)] = {
+  private[sql] def heapIncreaseKey(
+                               A: Array[(Int, (Long, Long), Int)],
+                               i: Int,
+                               key: (Int, (Long, Long), Int)
+                             ): Array[(Int, (Long, Long), Int)] = {
     if (compare(key._2, A(i - 1)._2) > 0) {
-      //      logInfo(s"new key is larger than current Key")
+      logInfo(s"new key is larger than current Key")
     }
     val AA = A.clone()
     AA(i - 1) = key
@@ -202,15 +200,16 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     AA
   }
 
-  private def minHeapInsert(
-                     A: Array[(Int, (Long, Long), Int)],
-                     key: Tuple3[Int, (Long, Long), Int]
-                   ): Array[(Int, (Long, Long), Int)] = {
+  private[sql] def minHeapInsert(
+                             A: Array[(Int, (Long, Long), Int)],
+                             key: (Int, (Long, Long), Int)
+                           ): Array[(Int, (Long, Long), Int)] = {
     val AA = Array.concat(A, Array(key).map(x => (x._1, (Long.MaxValue, Long.MaxValue), x._3)))
     heapIncreaseKey(AA, AA.length, key)
   }
 
-  private def buildMinHeap(A: Array[(Int, (Long, Long), Int)]): Array[(Int, (Long, Long), Int)] = {
+  private[sql] def buildMinHeap(
+    A: Array[(Int, (Long, Long), Int)]): Array[(Int, (Long, Long), Int)] = {
     var AA = A.clone()
     for (i <- (1 until Math.floor(AA.length / 2).toInt + 1).reverse) {
       AA = minHeapify(AA, i)
@@ -218,7 +217,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     AA
   }
 
-  private def hashStrategy(key: Int): Int = {
+  private[sql] def hashStrategy(key: Int): Int = {
     val code = (key % num_partitions)
     if (code < 0) {
       code + num_partitions
@@ -227,18 +226,18 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     }
   }
 
-  private def calculateVsl(
-                    s: Int,
-                    l: Int,
-                    indexNum: scala.collection.Map[(Int, Boolean), Long],
-                    partitionTable: scala.collection.Map[Int, Int],
-                    substring: Array[String],
-                    H: Int,
-                    minimum: Int,
-                    alpha: Double,
-                    numPartition: Int,
-                    topDegree: Int
-                  ): Array[Int] = {
+  private[sql] def calculateVsl(
+                            s: Int,
+                            l: Int,
+                            indexNum: scala.collection.Map[(Int, Boolean), Long],
+                            partitionTable: scala.collection.Map[Int, Int],
+                            substring: Array[String],
+                            H: Int,
+                            minimum: Int,
+                            alpha: Double,
+                            numPartition: Int,
+                            topDegree: Int
+                          ): Array[Int] = {
 
     val C0 = {
       for (i <- 1 until H + 1) yield {
@@ -337,14 +336,12 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     val deata0 = {
       for (i <- 0 until H) yield {
         Tuple2(deata_distribute0(i), C1(i) - C0(i))
-        //                C1(i) - C0(i)
       }
     }.toArray
 
     val deata1 = {
       for (i <- 0 until H) yield {
         Tuple2(deata_distribute1(i), C2(i) - C1(i))
-        //                C2(i) - C1(i)
       }
     }.toArray
 
@@ -381,26 +378,28 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
   }
 
 
-  private def partition_r(
-                   ss1: String,
-                   indexNum: scala.collection.Map[(Int, Boolean), Long],
-                   partitionTable: scala.collection.Map[Int, Int],
-                   minimum: Int,
-                   group: Array[(Int, Int)],
-                   threshold: Double,
-                   alpha: Double,
-                   partitionNum: Int,
-                   topDegree: Int
-                 ): Array[(Array[(Array[Int], Array[Boolean])],
+  private[sql] def partition_r(
+                           ss1: String,
+                           indexNum: scala.collection.Map[(Int, Boolean), Long],
+                           partitionTable: scala.collection.Map[Int, Int],
+                           minimum: Int,
+                           group: Array[(Int, Int)],
+                           threshold: Double,
+                           alpha: Double,
+                           partitionNum: Int,
+                           topDegree: Int
+                         ): Array[(Array[(Array[Int], Array[Boolean])],
     Array[(Int, Boolean, Array[Boolean], Boolean, Int)])] = {
     var result = ArrayBuffer[(Array[(Array[Int], Array[Boolean])],
       Array[(Int, Boolean, Array[Boolean],
         Boolean,
         Int)])]()
-    var ss = ss1.split(" ")
+    val ss = ss1.split(" ")
     val s = ss.size
     val range = group
-      .filter(x => !(x._1 > s || x._2 < (Math.ceil(threshold * s) + 0.0001).toInt))
+      .filter(x => {
+        x._1 <= Math.floor(s / threshold).toInt && x._2 >= (Math.ceil(threshold * s) + 0.0001).toInt
+      })
     for (lrange <- range) {
       val l = lrange._1
       val isExtend = {
@@ -423,7 +422,6 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
         }
       }.toArray
 
-      //      println(ss1)
       val V = calculateVsl(s,
         l,
         indexNum,
@@ -434,12 +432,6 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
         alpha,
         partitionNum,
         topDegree)
-
-      //      var V_Info = ""
-      //      for (ii <- V) {
-      //        V_Info += " " + ii.toString
-      //      }
-      //      logInfo(s"V_INFO: " + V_Info)
 
       for (i <- 1 until H + 1) {
         val p = ss.filter(x => x.hashCode % H + 1 == i)
@@ -454,18 +446,15 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       for (i <- 1 until H + 1) {
         val hash = (substring(i - 1), i, l).hashCode()
         if (V(i - 1) == 1) {
-          //          logInfo(s"inverse: " + substring(i - 1) + " " + i.toString +
-          //            " " + l.toString + " " + V(i - 1))
+          logInfo(s"segProbeSig_1: (" + substring(i - 1) + ", " + i + ", " + l + ")" )
           result1 += Tuple5(hash, false, Array(false), isExtend, i)
         }
         else if (V(i - 1) == 2) {
-          //          logInfo(s"inverse: " + substring(i - 1) + " " + i.toString +
-          //            " " + l.toString + " " + V(i - 1))
+          logInfo(s"segProbeSig_2: (" + substring(i - 1) + ", " + i + ", " + l + ")" )
           result1 += Tuple5(hash, false, Array(true), isExtend, i)
           if (substring(i - 1).length > 0) {
             for (k <- createDeletion(substring(i - 1))) {
-              //              logInfo(s"deletion: " + k + " " + i.toString +
-              //                " " + l.toString + " " + V(i - 1))
+              logInfo(s"segProbeSig_2: (" + k + ", " + i + ", " + l + ")" )
               val hash1 = (k, i, l).hashCode()
               result1 += Tuple5(hash1, true, Array(true), isExtend, i)
             }
@@ -476,13 +465,12 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     }
 
     result.toArray
-    // (hash, isDeletion, V, isExtend)
   }
 
-  private def createInverse(ss1: String,
-                    group: Array[(Int, Int)],
-                    threshold: Double
-                   ): Array[(String, Int, Int)] = {
+  private[sql] def createInverse(ss1: String,
+                            group: Array[(Int, Int)],
+                            threshold: Double
+                           ): Array[(String, Int, Int)] = {
     {
       val ss = ss1.split(" ")
       val range = group.filter(
@@ -490,7 +478,6 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       )
       val sl = range(range.length - 1)._1
       val H = CalculateH1(sl, threshold)
-      //      logInfo(s"createInverse: H: " + H.toString)
       for (i <- 1 until H + 1) yield {
         val s = ss.filter(x => {
           x.hashCode % H + 1 == i
@@ -507,7 +494,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
   }
 
 
-  private def sort(xs: Array[String]): Array[String] = {
+  private[sql] def sort(xs: Array[String]): Array[String] = {
     if (xs.length <= 1) {
       xs
     } else {
@@ -520,30 +507,19 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     }
   }
 
-  private def sortByValue(x: String): String = {
+  private[sql] def sortByValue(x: String): String = {
     sort(x.split(" ")).reduce(_ + " " + _)
   }
 
-  private def calculateOverlapBound(t: Float, xl: Int, yl: Int): Int = {
+  private[sql] def calculateOverlapBound(t: Float, xl: Int, yl: Int): Int = {
     (Math.ceil((t / (t + 1)) * (xl + yl)) + 0.0001).toInt
   }
 
-  private def min(x: Int, y: Int): Int = {
-    if (x < y) {
-      x
-    } else {
-      y
-    }
-  }
-
-  private def verify(x: Array[(Array[Int], Array[Boolean])],
-             y: Array[(Array[Int], Array[Boolean])],
-             threshold: Double,
-             pos: Int
-            ): Boolean = {
-    // 能走到这一步的 l 都是相同的, l 相同, 段数也就相同,所以 x 和 y 长度相同,
-    // 需要一段一段匹配.pos 是当前 匹配的键,如果发现这个键的前面还有匹配,那么退出.
-    // 判断是否匹配要从两个记录对应段的v值着手0,1,2
+  private[sql] def verify(x: Array[(Array[Int], Array[Boolean])],
+                     y: Array[(Array[Int], Array[Boolean])],
+                     threshold: Double,
+                     pos: Int
+                    ): Boolean = {
     var xLength = 0
     for (i <- x) {
       xLength += i._1.length
@@ -597,7 +573,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
         if (diff < Vx || diff < Vy) {
           return false
         }
-      } // before matching
+      }
       if (currentOverlap + Math.min((xLength - currentXLength),
         (yLength - currentYLength)) < overlap) {
         return false
@@ -610,66 +586,34 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     }
   }
 
-  private def compareSimilarity(query: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])]),
-    Boolean, Array[Boolean], Boolean, Int),
-                        index: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])]),
-                          Boolean)): Boolean = {
-    //    logInfo(s"comparing " + query._1._1.toString + " and " + index._1._1.toString)
+  private[sql] def compareSimilarity(
+    query: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])])
+      , Boolean, Array[Boolean], Boolean, Int),
+    index: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])]), Boolean)): Boolean = {
+    logInfo(s"compare " + query._1._1 + " and " + index._1._1)
     val pos = query._5
     if (index._2) {
-      // it's a deletion index
       if (!query._2 && query._3.length > 0 && query._3(0)) {
-        // query from inverse with value 2
-        if (query._1._1 != index._1._1) {
           verify(query._1._3, index._1._3, threshold, pos)
-          //                      true
-        } else {
-          false
-        }
       } else {
         false
       }
     } else {
-      // it's a reverse index
       if (!query._2 && !query._4 && query._3.length > 0) {
-        // query from inverse index with value 2 or 1
-        if (query._1._1 < index._1._1) {
-          verify(query._1._3, index._1._3, threshold, pos)
-          //                      true
-        } else {
-          false
-        }
+        verify(query._1._3, index._1._3, threshold, pos)
       } else if (!query._2 && query._4 && query._3.length > 0) {
-        // query from inverse query with value 2 or 1
-        if (query._1._1 != index._1._1) {
-          verify(query._1._3, index._1._3, threshold, pos)
-          //                      true
-        } else {
-          false
-        }
+        verify(query._1._3, index._1._3, threshold, pos)
       } else if (query._2 && !query._4 && query._3.length > 0 && query._3(0)) {
-        // query from deletion index with value 2
-        if (query._1._1 < index._1._1) {
-          verify(query._1._3, index._1._3, threshold, pos)
-          //                      true
-        } else {
-          false
-        }
+        verify(query._1._3, index._1._3, threshold, pos)
       } else if (query._2 && query._4 && query._3.length > 0 && query._3(0)) {
-        // query from deletion query with value 2
-        if (query._1._1 != index._1._1) {
-          verify(query._1._3, index._1._3, threshold, pos)
-          //                      true
-        } else {
-          false
-        }
+        verify(query._1._3, index._1._3, threshold, pos)
       } else {
         false
       }
     }
   }
 
-  private def multigroup(mini: Int,
+  private[sql] def multigroup(mini: Int,
                          maxi: Int,
                          threshold: Double,
                          alpha: Double): Array[(Int, Int)] = {
@@ -683,22 +627,8 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     result.toArray
   }
 
-  private def choosePartition(frequency: Int): Int = {
-    var min = Long.MaxValue
-    var partitionId = -1
-    for ((i, id) <- indexDistribute.slice(0, num_partitions).zipWithIndex) {
-      if (i < min) {
-        min = i
-        partitionId = id
-      }
-    }
-    indexDistribute(partitionId) += frequency
-    partitionId
-  }
-
   override protected def doExecute(): RDD[InternalRow] = {
     logInfo(s"execute JaccardSelfSimilarityJoin")
-    // val distribute = initialDistribute.clone()
     val left_rdd = left.execute().map(row =>
     {
       val key = BindReferences
@@ -734,37 +664,35 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       + count.value.toString)
 
     val record = left_rdd
-      // .filter(x => {val l = x.split(" "); l.length < 500 && l(0).length > 0})*/
       .map(x => (sortByValue(x._1), x._2))
       .distinct
       .persist(StorageLevel.DISK_ONLY)
-    // .map(x => mapTokenToId(tokenMapId.value, x))
-    val multiGroup = sparkContext.broadcast(multigroup(minimum.value, maximum.value, threshold, alpha))
+    val multiGroup = sparkContext
+      .broadcast(multigroup(minimum.value, maximum.value, threshold, alpha))
 
-    val recordidMapSubstring = record
+    val splittedRecord = record
       .map(x => {
         ((x._1, x._2), createInverse(x._1, multiGroup.value, threshold))
       })
       .flatMapValues(x => x)
       .map(x => ((x._1, x._2._2, x._2._3), x._2._1))
 
-    val deletionMapRecord = recordidMapSubstring
+    val deletionIndexSig = splittedRecord
       .filter(x => (x._2.length > 0))
-      .map(x => (x._1, createDeletion(x._2))) // (1,i,l), deletionSubstring
+      .map(x => (x._1, createDeletion(x._2)))
       .flatMapValues(x => x)
       .map(x => {
-        //        println(s"deletion index: " + x._2 + " " + x._1._2 + " " + x._1._3)
+        logInfo(s"deletionIndexSig: (" + x._2 + ", " + x._1._2 + ", " + x._1._3 + ")" )
         ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, true))
       })
-    // (hashCode, (String, internalrow))
 
-    val inverseMapRecord = recordidMapSubstring
+    val segIndexSig = splittedRecord
       .map(x => {
-        //        println(s"inverse index: " + x._2 + " " + x._1._2 + " " + x._1._3)
+        logInfo(s"segIndexSig: (" + x._2 + ", " + x._1._2 + ", " + x._1._3 + ")" )
         ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, false))
       })
 
-    val index = deletionMapRecord.union(inverseMapRecord).persist(StorageLevel.DISK_ONLY)
+    val index = deletionIndexSig.union(segIndexSig).persist(StorageLevel.DISK_ONLY)
 
     val f = index
       .map(x => ((x._1, x._2._2), 1.toLong))
@@ -778,11 +706,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
         .collectAsMap()
     )
     val partitionTable = sparkContext.broadcast(
-//      f
-//        .map(x => (x._1._1, x._2))
-//        .reduceByKey(_ + _)
-//        .mapValues(choosePartition(_))
-//        .collectAsMap()
+      // this part controls the index repartition
       Array[(Int, Int)]().toMap
     )
 
@@ -805,7 +729,6 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     index_rdd_indexed.count
 
     val query_rdd = right_rdd
-      // .filter(x => {val l = x.split(" "); l.length < 500 && l(0).length > 0})*/
       .map(x => (sortByValue(x._1), x._2))
       .distinct
       .map(x => ((x._1.hashCode, x._2),
@@ -813,12 +736,10 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
           x._1, frequencyTable.value, partitionTable.value, minimum.value, multiGroup.value,
           threshold, alpha, num_partitions, topDegree
         )))
-      // (id, Array(String, Array(subid, isDeletion, V, isExtend, i)))
       .flatMapValues(x => x)
       .map(x => ((x._1._1, x._1._2, x._2._1), x._2._2))
       .flatMapValues(x => x)
       .map(x => (x._2._1, (x._1, x._2._2, x._2._3, x._2._4, x._2._5)))
-    // (key, (String, (id, InternalRow), isDeletion, V, isExtend, i))
 
     def Has(x : Int, array: Array[Int]): Boolean = {
       for (i <- array) {
@@ -868,21 +789,18 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
 
     val query_rdd_partitioned = new SimilarityRDD(
       query_rdd
-      .partitionBy(
-        new SimilarityQueryPartitioner(
-          num_partitions, partitionTable.value, frequencyTable.value, maxPartitionId.value)
-      ), true
+        .partitionBy(
+          new SimilarityQueryPartitioner(
+            num_partitions, partitionTable.value, frequencyTable.value, maxPartitionId.value)
+        ), true
     )
       .persist(StorageLevel.MEMORY_AND_DISK_SER)
 
-    // construct index ahead of time
     query_rdd_partitioned.count
 
     query_rdd_partitioned.zipPartitions(index_rdd_indexed, true) {
       (leftIter, rightIter) => {
-        // logInfo(leftIter.length.toString())
         val ans = mutable.ListBuffer[(InternalRow, InternalRow)]()
-        //        val ans = mutable.ListBuffer[Long]()
         val index = rightIter.next
         val index2 = extraIndex.value
         var countNum = 0.toLong
@@ -890,8 +808,6 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
         val partitionId = index.partitionId
         while (leftIter.hasNext) {
           val q = leftIter.next
-          //          logInfo(s"enter in findSimilarity")
-          // this is the partition which I want to search
           val positionOfQ = partitionTable.value.getOrElse(q._1, hashStrategy(q._1))
           val (candidate, whichIndex) = {
             if (positionOfQ != partitionId) {
@@ -924,9 +840,8 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
               ans += Tuple2(q._2._1._2, data._1._2)
             }
           }
-          //          ans += Tuple3(pId, q._1, candidate.length)
         }
-        ans.map(x => new JoinedRow(x._1, x._2)).iterator
+        ans.map(x => new JoinedRow(x._2, x._1)).iterator
       }
     }
   }

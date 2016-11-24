@@ -17,7 +17,6 @@
 
 package org.apache.spark.sql.index
 
-import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
@@ -30,12 +29,14 @@ import org.apache.spark.sql.types.{DoubleType, IntegerType}
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.sql.execution.SimilarityRDD
 
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ArrayBuffer, Map}
 
 /**
  * Created by dong on 1/15/16.
  * Indexed Relation Structures for Simba
  */
+
+
 
 private[sql] case class PackedPartitionWithIndex(data: Array[InternalRow], index: Index)
 
@@ -51,6 +52,8 @@ private[sql] object IndexedRelation {
         new HashMapIndexedRelation(child.output, child, table_name, column_keys, index_name)()
       case JaccardIndexType =>
         new JaccardIndexIndexedRelation(child.output, child, table_name, column_keys, index_name)()
+      case EdIndexType =>
+        new EdIndexIndexedRelation(child.output, child, table_name, column_keys, index_name)()
       case _ => null
     }
   }
@@ -249,7 +252,12 @@ private[sql] case class RTreeIndexedRelation(
   * Created by sunji on 16/10/15.
   */
 
-private[sql] case class IPartition(index: Index, data: Array[((String, InternalRow), Boolean)])
+private[sql] case class IPartition(partitionId: Int,
+                                   index: Index,
+                                   data: Array[((Int,
+                                     InternalRow,
+                                     Array[(Array[Int], Array[Boolean])]),
+                                     Boolean)])
 
 private[sql] abstract class IndexedRelationForJaccard extends LogicalPlan {
   self: Product =>
@@ -271,11 +279,11 @@ private[sql] case class JaccardIndexIndexedRelation(
                                                                          var indexRDD: RDD[IPartition] = null)
   extends IndexedRelation with MultiInstanceRelation {
   require(column_keys.length == 1)
-  val numPartitions = child.sqlContext.conf.numSimilarityPartitions.toInt
-  val threshold = child.sqlContext.conf.similarityJaccardThreshold.toDouble
-  val alpha = child.sqlContext.conf.similarityMultigroupThreshold.toDouble
-  val topDegree = child.sqlContext.conf.similarityBalanceTopDegree.toInt
-  val abandonNum = child.sqlContext.conf.similarityFrequencyAbandonNum.toInt
+  val numPartitions = child.sqlContext.conf.numSimilarityPartitions
+  val threshold = child.sqlContext.conf.similarityJaccardThreshold
+  val alpha = child.sqlContext.conf.similarityMultigroupThreshold
+  val topDegree = child.sqlContext.conf.similarityBalanceTopDegree
+  val abandonNum = child.sqlContext.conf.similarityFrequencyAbandonNum
 
   if (indexRDD == null) {
     buildIndex()
@@ -366,7 +374,7 @@ private[sql] case class JaccardIndexIndexedRelation(
 
     val dataRDD = child.execute().map(row => {
       val key = BindReferences.bindReference(column_keys.head, child.output).eval(row)
-      (key, row)
+      (key, row.copy())
     })
 
     val rdd = dataRDD
@@ -388,47 +396,57 @@ private[sql] case class JaccardIndexIndexedRelation(
       .map(t => (sortByValue(t._1.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString),
         t._2))
 
-    val recordidMapSubstring = inverseRDD
+    val splittedRecord = inverseRDD
       .map(x => {
         ((x._1, x._2), createInverse(x._1, multiGroup.value, threshold))
       })
       .flatMapValues(x => x)
       .map(x => ((x._1, x._2._2, x._2._3), x._2._1))
 
-    val deletionMapRecord = recordidMapSubstring
+    val deletionIndexSig = splittedRecord
       .filter(x => (x._2.length > 0))
       .map(x => (x._1, createDeletion(x._2))) // (1,i,l), deletionSubstring
       .flatMapValues(x => x)
       .map(x => {
-//        println(s"deletion index: " + x._2 + " " + x._1._2 + " " + x._1._3)
+        println(s"deletion index: " + x._2 + " " + x._1._2 + " " + x._1._3)
         ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, true))
       })
     // (hashCode, (String, internalrow))
 
-    val inverseMapRecord = recordidMapSubstring
+    val segIndexSig = splittedRecord
       .map(x => {
-//        println(s"inverse index: " + x._2 + " " + x._1._2 + " " + x._1._3)
+        println(s"inverse index: " + x._2 + " " + x._1._2 + " " + x._1._3)
         ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, false))
       })
 
-    val index = deletionMapRecord.union(inverseMapRecord).persist(StorageLevel.DISK_ONLY)
+    val index = deletionIndexSig.union(segIndexSig).persist(StorageLevel.DISK_ONLY)
+
+    val f = index
+      .map(x => ((x._1, x._2._2), 1L))
+      .reduceByKey(_ + _)
+      .filter(x => x._2 > abandonNum)
+      .persist
 
     val frequencyTable = child.sparkContext.broadcast(
-      index
-        .map(x => ((x._1, x._2._2), 1))
-        .reduceByKey(_ + _)
-        .filter(x => x._2 > abandonNum)
-        .collectAsMap()
+      f.collectAsMap()
     )
 
-    val partitionedRDD = new SimilarityRDD(index
-      .partitionBy(new SimilarityHashPartitioner(numPartitions)), true)
+    val partitionTable = Array[(Int, Int)]().toMap
 
-    val indexed = partitionedRDD.mapPartitions(iter => {
+    val partitionedRDD = new SimilarityRDD(index
+      .partitionBy(new SimilarityHashPartitioner(numPartitions, partitionTable)), true)
+
+    val indexed = partitionedRDD.mapPartitionsWithIndex((partitionId, iter) => {
       val data = iter.toArray
       val index = JaccardIndex(data,
         threshold, frequencyTable, multiGroup, minimum.value, alpha, numPartitions)
-      Array(IPartition(index, data.map(x => x._2))).iterator
+      Array(IPartition(partitionId, index, data
+        .map(x => ((sortByValue(x._2._1._1).hashCode,
+          x._2._1._2,
+          createInverse(sortByValue(x._2._1._1),
+            multiGroup.value,
+            threshold)
+        .map(x => (x._1.split(" ").map(s => s.hashCode), Array[Boolean]()))), x._2._2)))).iterator
     }).persist(StorageLevel.MEMORY_AND_DISK_SER)
 
     indexed.setName(table_name.map(n => s"$n $index_name").getOrElse(child.toString))
@@ -438,7 +456,7 @@ private[sql] case class JaccardIndexIndexedRelation(
       multiGroup,
       minimum.value,
       alpha,
-      numPartitions)
+      numPartitions, threshold)
     indexRDD = indexed
   }
 
@@ -449,6 +467,212 @@ private[sql] case class JaccardIndexIndexedRelation(
 
   override def withOutput(new_output: Seq[Attribute]): IndexedRelation = {
     new JaccardIndexIndexedRelation(new_output,
+      child, table_name, column_keys, index_name)(_indexedRDD, indexRDD)
+  }
+
+  @transient override lazy val statistics = Statistics(
+    // TODO: Instead of returning a default value here, find a way to return a meaningful size
+    // estimate for RDDs. See PR 1238 for more discussions.
+    sizeInBytes = BigInt(child.sqlContext.conf.defaultSizeInBytes)
+  )
+}
+
+/**
+  * Created by sunji on 16/11/16.
+  */
+
+import org.apache.spark.sql.SimilarityProbe.ValueInfo
+
+private[sql] case class EPartition(partitionId: Int,
+                                   index: Index,
+                                   data: Array[ValueInfo])
+
+private[sql] case class EdIndexIndexedRelation(
+                                                     output: Seq[Attribute],
+                                                     child: SparkPlan,
+                                                     table_name: Option[String],
+                                                     column_keys: List[Attribute],
+                                                     index_name: String)(var _indexedRDD: RDD[PackedPartitionWithIndex] = null,
+                                                                         var indexRDD: RDD[EPartition] = null)
+  extends IndexedRelation with MultiInstanceRelation {
+  require(column_keys.length == 1)
+  val num_partitions = child.sqlContext.conf.numSimilarityPartitions
+  val threshold = child.sqlContext.conf.similarityEditDistanceThreshold
+  val topDegree = child.sqlContext.conf.similarityBalanceTopDegree
+  val abandonNum = child.sqlContext.conf.similarityFrequencyAbandonNum
+  val weight = child.sqlContext.conf.similarityMaxWeight.split(",").map(_.toInt)
+
+  if (indexRDD == null) {
+    buildIndex()
+  }
+
+  private def Lij(l: Int, i: Int, threshold: Int): Int = {
+    val U = threshold
+    val K = (l - Math.floor(l / (U + 1)) * (U + 1)).toInt
+    if (i <= (U + 1 - K)) {
+      return Math.floor(l / (U + 1)).toInt
+    }
+    else {
+      return (Math.ceil(l / (U + 1)) + 0.001).toInt
+    }
+  }
+
+  private def Pij(l: Int, i: Int, L: scala.collection.Map[(Int, Int), Int]): Int = {
+    var p = 0
+    for (j <- 1 until i) {
+      p = p + L((l, j))
+    }
+    return p + 1
+  }
+
+  private def calculateAllL(min: Int,
+                            max: Int,
+                            threshold: Int): Map[(Int, Int), Int] = {
+    val result = Map[(Int, Int), Int]()
+    for (l <- min until max + 1) {
+      for (i <- 1 until threshold + 2) {
+        result += ((l, i) -> Lij(l, i, threshold))
+      }
+    }
+    result
+  }
+
+  private def calculateAllP(min: Int,
+                            max: Int,
+                            L: scala.collection.Map[(Int, Int), Int],
+                            threshold: Int): Map[(Int, Int), Int] = {
+    val result = Map[(Int, Int), Int]()
+    for (l <- min until max + 1) {
+      for (i <- 1 until threshold + 2) {
+        result += ((l, i) -> Pij(l, i, L))
+      }
+    }
+    result
+  }
+
+  private def part(content: InternalRow, s: String, threshold: Int): Array[(Int, ValueInfo)] = {
+    var ss = ArrayBuffer[(Int, ValueInfo)]()
+    val U: Int = threshold
+    val l = s.length
+    val K: Int = (l - Math.floor(l / (U + 1)) * (U + 1)).toInt
+    var point: Int = 0
+    for (i <- 1 until U + 2) {
+      if (i <= (U + 1 - K)) {
+        val length = Math.floor(l / (U + 1)).toInt
+        val seg1 = {
+          s.slice(point, point + length)
+        }
+        ss += Tuple2((seg1, i, l, 0).hashCode(),
+          ValueInfo(content, s, false, Array[Boolean]()))
+
+        for (n <- 0 until length) {
+          val subset = s.slice(point, point + n) + s.slice(point + n + 1, point + length)
+          val seg = subset
+          val key = (seg, i, l, n + 1).hashCode()
+          ss += Tuple2(key, ValueInfo(content, s, true, Array[Boolean]()))
+        }
+        point = point + length
+      } else {
+        val length = Math.ceil(l / (U + 1) + 0.001).toInt
+        val seg1 = {
+          val xx = s.slice(point, point + length)
+          xx
+        }
+        ss += Tuple2((seg1, i, l, 0).hashCode(),
+          ValueInfo(content, s, false, Array[Boolean]()))
+        for (n <- 0 until length) {
+          val subset = s.slice(point, point + n) + s.slice(point + n + 1, point + length)
+          val seg = subset
+          val key = (seg, i, l, n + 1).hashCode()
+          ss += Tuple2(key, ValueInfo(content, s, true, Array[Boolean]()))
+        }
+        point = point + length
+      }
+    }
+    ss.toArray
+  } // (substring, i, rlength)
+
+  private[sql] def buildIndex(): Unit = {
+
+    val dataRDD = child.execute().map(row => {
+      val key = BindReferences.bindReference(column_keys.head, child.output).eval(row)
+      (key, row.copy())
+    })
+
+    val rdd = dataRDD
+      .map(t => (t._1.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString,
+        t._2))
+
+    val indexLength = rdd
+      .map(x => x._1.length)
+      .persist(StorageLevel.DISK_ONLY)
+
+    val minLength = child.sparkContext.broadcast(Math.max(indexLength.min, threshold + 1))
+    val maxLength = child.sparkContext.broadcast(indexLength.max)
+
+    val partitionL = child.sparkContext
+      .broadcast(calculateAllL(1, maxLength.value, threshold))
+    val partitionP = child.sparkContext
+      .broadcast(calculateAllP(1, maxLength.value, partitionL.value, threshold))
+
+    val index_rdd = rdd
+      .map(x => (x._1.length, x._1, x._2))
+      .filter(x => x._1 > threshold)
+      .flatMap(x => part(x._3, x._2, threshold))
+      .map(x => (x._1, x._2))
+      .persist(StorageLevel.DISK_ONLY)
+
+    val f =
+      index_rdd.map(x => {
+        ((x._1, x._2.isDeletion), 1.toLong)
+      })
+        .reduceByKey(_ + _)
+        .filter(x => x._2 > abandonNum)
+    //    println(s"frequencyTableLength: $f")
+
+    val frequencyTable = child.sparkContext.broadcast(
+      f.collectAsMap()
+    )
+
+    val partitionTable = child.sparkContext.broadcast(
+      Array[(Int, Int)]().toMap
+    )
+
+    val index_partitioned_rdd = new SimilarityRDD(
+      index_rdd.partitionBy(
+        new SimilarityHashPartitioner(
+          num_partitions, partitionTable.value)), true)
+
+    val indexed =
+      index_partitioned_rdd
+        .mapPartitionsWithIndex((partitionId, iter) => {
+          val data = iter.toArray
+          val index = EdIndex(data, threshold, frequencyTable, minLength.value, num_partitions)
+          Array(EPartition(partitionId, index, data.map(x => x._2))).iterator
+          //          Array(index.size).iterator
+        })
+        .persist(StorageLevel.MEMORY_AND_DISK_SER)
+
+    indexed.setName(table_name.map(n => s"$n $index_name").getOrElse(child.toString))
+    indexed.count
+    child.sqlContext.indexManager.addEdIndexGlobalInfo(threshold,
+      frequencyTable,
+      minLength.value,
+      num_partitions,
+      partitionP,
+      partitionL,
+      topDegree,
+      weight, maxLength.value)
+    indexRDD = indexed
+  }
+
+  override def newInstance(): IndexedRelation = {
+    new EdIndexIndexedRelation(output.map(_.newInstance()), child, table_name,
+      column_keys, index_name)(_indexedRDD, indexRDD).asInstanceOf[this.type]
+  }
+
+  override def withOutput(new_output: Seq[Attribute]): IndexedRelation = {
+    new EdIndexIndexedRelation(new_output,
       child, table_name, column_keys, index_name)(_indexedRDD, indexRDD)
   }
 

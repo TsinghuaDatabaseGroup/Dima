@@ -19,7 +19,7 @@ package org.apache.spark.sql.catalyst
 
 import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.analysis._
-import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.expressions.{JaccardSimilarity, _}
 import org.apache.spark.sql.catalyst.expressions.aggregate._
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -123,6 +123,7 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
   // SimilarityJoin Keywords
   protected val STRING = Keyword("STRING")
   protected val JACCARDSIMILARITY = Keyword("JACCARDSIMILARITY")
+  protected val EDSIMILARITY = Keyword("EDSIMILARITY")
   protected val SIMILARITY = Keyword("SIMILARITY")
   protected val SELFSIMILARITY = Keyword("SELFSIMILARITY")
   protected val JACCARD = Keyword("JACCARD")
@@ -193,20 +194,25 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
       | ("(" ~> start <~ ")") ~ (AS.? ~> ident) ^^ { case s ~ a => Subquery(a, s) }
     )
 
-  protected lazy val joinedRelation: Parser[LogicalPlan] = (
+  protected lazy val joinedRelation: Parser[LogicalPlan] =
     relationFactor ~ rep1(joinType.? ~ (JOIN ~> relationFactor) ~ joinConditions.?) ^^ {
       case r1 ~ joins =>
         joins.foldLeft(r1) { case (lhs, jt ~ rhs ~ cond) =>
           Join(lhs, rhs, joinType = jt.getOrElse(Inner), cond)
         }
     }
-    )
 
   protected lazy val joinConditions: Parser[Expression] =
     ( ON ~> (POINT ~ "(" ~> repsep(termExpression, ",")  <~ ")") ~
       (IN ~ POINT ~ "(" ~ POINT ~ "(" ~> repsep(termExpression, ",") <~ ")")
       ~ ("," ~> literal <~ ")") ^^
       { case point ~ target ~ l => InKNN(point, target, l) }
+      | ON ~> (JACCARDSIMILARITY ~ "(" ~> termExpression)
+      ~ ("," ~> termExpression <~ ")") ~ (">=" ~> literal) ^^
+      { case string ~ target ~ delta => JaccardSimilarity(string, target, delta) }
+      | ON ~> (EDSIMILARITY ~ "(" ~> termExpression)
+      ~ ("," ~> termExpression <~ ")") ~ ("<=" ~> literal) ^^
+      { case string ~ target ~ delta => EdSimilarity(string, target, delta) }
       )
 
   protected lazy val joinType: Parser[JoinType] =
@@ -264,6 +270,9 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
     | (JACCARDSIMILARITY ~ "(" ~> termExpression)
       ~ ("," ~> termExpression <~ ")") ~ (">=" ~> literal) ^^
       { case string ~ target ~ delta => JaccardSimilarity(string, target, delta) }
+    | (EDSIMILARITY ~ "(" ~> termExpression)
+      ~ ("," ~> termExpression <~ ")") ~ ("<=" ~> literal) ^^
+      { case string ~ target ~ delta => EdSimilarity(string, target, delta) }
     | termExpression ~ ("="  ~> termExpression) ^^ { case e1 ~ e2 => EqualTo(e1, e2) }
     | termExpression ~ ("<"  ~> termExpression) ^^ { case e1 ~ e2 => LessThan(e1, e2) }
     | termExpression ~ ("<=" ~> termExpression) ^^ { case e1 ~ e2 => LessThanOrEqual(e1, e2) }

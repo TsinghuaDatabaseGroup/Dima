@@ -466,25 +466,29 @@ private[spark] object SQLConf {
   val KNN_JOIN_METHOD = stringConf("spark.sql.joins.knnJoinMethod",
     defaultValue = Some("RTreeKNNJoin"))
   val SIMILARITY_JOIN_METHOD = stringConf("spark.sql.joins.similarityJoinMethod",
-    defaultValue = Some("JaccardSimilarityJoin"))
-  val NUM_SIMILARITY_PARTITIONS = stringConf("spark.sql.joins.numSimialrityPartitions",
-    defaultValue = Some("2"))
-  val SIMILARITY_JACCARD_THRESHOLD = stringConf("spark.sql.joins.similarityJaccardThreshold",
-    defaultValue = Some("0.8"))
-  val SIMILARITY_EDIT_DISTANCE_THRESHOLD = stringConf("spark.sql.joins.similarityEditDistanceThreshold",
-    defaultValue = Some("3"))
-  val SIMILARITY_MULTIGROUP_THRESHOLD = stringConf("spark.sql.joins.similarityMultigroupThreshold",
-    defaultValue = Some("0.95"))
-  val SIMILARITY_BALANCE_TOPDEGREE = stringConf("spark.sql.joins.similarityBalanceTopdegree",
-    defaultValue = Some("1"))
-  val SIMILARITY_FREQUENCY_ABANDON_NUM = stringConf("spark.sql.joins.similarityFrequencyAbandonNum",
-    defaultValue = Some("2"))
-  val SIMILARITY_TRADE_OFF = stringConf("spark.sql.joins.similarityTradeOff",
-    defaultValue = Some("1"))
+    defaultValue = Some("Jaccard"))
+  val NUM_SIMILARITY_PARTITIONS = intConf("spark.sql.joins.numSimialrityPartitions",
+    defaultValue = Some(2))
+  val SIMILARITY_JACCARD_THRESHOLD = doubleConf("spark.sql.joins.similarityJaccardThreshold",
+    defaultValue = Some(0.8))
+  val SIMILARITY_EDIT_DISTANCE_THRESHOLD = intConf(
+    "spark.sql.joins.similarityEditDistanceThreshold",
+    defaultValue = Some(3)
+  )
+  val SIMILARITY_MULTIGROUP_THRESHOLD = doubleConf("spark.sql.joins.similarityMultigroupThreshold",
+    defaultValue = Some(0.95))
+  val SIMILARITY_BALANCE_TOPDEGREE = intConf("spark.sql.joins.similarityBalanceTopdegree",
+    defaultValue = Some(0))
+  val SIMILARITY_FREQUENCY_ABANDON_NUM = intConf("spark.sql.joins.similarityFrequencyAbandonNum",
+    defaultValue = Some(2))
+  val SIMILARITY_TRADE_OFF = intConf("spark.sql.joins.similarityTradeOff",
+    defaultValue = Some(1))
   val SIMILARITY_MAX_WEIGHT = stringConf("spark.sql.joins.similarityMaxWeight",
     defaultValue = Some("0"))
   val SIMILARITY_INIT_DISTRIBUTE = stringConf("spark.sql.joins.similarityInitDistribute",
     defaultValue = Some("0"))
+  val PARTITION_NUM_SEND = intConf("spark.sql.joins.partitionNumToBeSent",
+    defaultValue = Some(1))
 
   // RTree Parameters
   val MAX_ENTRIES_PER_NODE = intConf("spark.sql.spatial.rtree.maxEntriesPerNode", defaultValue = Some(25))
@@ -646,24 +650,27 @@ private[sql] class SQLConf extends Serializable with CatalystConf {
 
   private[spark] def similarityJoinMethod: String = getConf(SIMILARITY_JOIN_METHOD)
 
-  private[spark] def numSimilarityPartitions: String = getConf(NUM_SIMILARITY_PARTITIONS)
+  private[spark] def numSimilarityPartitions: Int = getConf(NUM_SIMILARITY_PARTITIONS)
 
-  private[spark] def similarityEditDistanceThreshold: String = getConf(SIMILARITY_EDIT_DISTANCE_THRESHOLD)
+  private[spark] def similarityEditDistanceThreshold: Int
+          = getConf(SIMILARITY_EDIT_DISTANCE_THRESHOLD)
 
-  private[spark] def similarityJaccardThreshold: String = getConf(SIMILARITY_JACCARD_THRESHOLD)
+  private[spark] def similarityJaccardThreshold: Double = getConf(SIMILARITY_JACCARD_THRESHOLD)
 
-  private[spark] def similarityMultigroupThreshold: String =
+  private[spark] def similarityMultigroupThreshold: Double =
     getConf(SIMILARITY_MULTIGROUP_THRESHOLD)
 
-  private[spark] def similarityBalanceTopDegree: String = getConf(SIMILARITY_BALANCE_TOPDEGREE)
+  private[spark] def similarityBalanceTopDegree: Int = getConf(SIMILARITY_BALANCE_TOPDEGREE)
 
-  private[spark] def similarityFrequencyAbandonNum: String = getConf(SIMILARITY_FREQUENCY_ABANDON_NUM)
+  private[spark] def similarityFrequencyAbandonNum: Int = getConf(SIMILARITY_FREQUENCY_ABANDON_NUM)
 
-  private[spark] def similarityTradeOff: String = getConf(SIMILARITY_TRADE_OFF)
+  private[spark] def similarityTradeOff: Int = getConf(SIMILARITY_TRADE_OFF)
 
   private[spark] def similarityMaxWeight: String = getConf(SIMILARITY_MAX_WEIGHT)
 
   private[spark] def similarityInitDistribute: String = getConf(SIMILARITY_INIT_DISTRIBUTE)
+
+  private[spark] def partitionNumToBeSent: Int = getConf(PARTITION_NUM_SEND)
 
   /** ********************** SQLConf functionality methods ************ */
 

@@ -29,6 +29,7 @@ object IndexType {
     case "treemap" => TreeMapType
     case "hashmap" => HashMapType
     case "jaccardindex" => JaccardIndexType
+    case "edindex" => EdIndexType
     case _ => null
   }
 }
@@ -39,3 +40,4 @@ case object RTreeType extends IndexType
 case object TreeMapType extends IndexType
 case object HashMapType extends IndexType
 case object JaccardIndexType extends IndexType
+case object EdIndexType extends IndexType
