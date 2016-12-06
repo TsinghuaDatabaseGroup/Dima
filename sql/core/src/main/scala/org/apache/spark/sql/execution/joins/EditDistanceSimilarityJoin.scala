@@ -25,6 +25,7 @@ import org.apache.spark.sql.partitioner.{SimilarityHashPartitioner, SimilarityQu
 import org.apache.spark.storage.StorageLevel
 import scala.collection.mutable.{ArrayBuffer, ListBuffer, Map}
 import org.apache.spark.sql.execution.SimilarityRDD
+import org.apache.spark.broadcast.Broadcast
 
 /**
   * Created by sunji on 16/9/2.
@@ -76,7 +77,7 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def minHeapify(A: Array[(Int, (Long, Long), Int)],
-                         i: Int): Array[(Int, (Long, Long), Int)] = {
+                              i: Int): Array[(Int, (Long, Long), Int)] = {
     val l = left_child(i)
     val r = right_child(i)
     val AA = A.clone()
@@ -107,8 +108,8 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def heapExtractMin(
-                      A: Array[(Int, (Long, Long), Int)]
-                    ): ((Int, (Long, Long), Int), Array[(Int, (Long, Long), Int)]) = {
+                                   A: Array[(Int, (Long, Long), Int)]
+                                 ): ((Int, (Long, Long), Int), Array[(Int, (Long, Long), Int)]) = {
     val heapSize = A.length
     if (heapSize < 1) {
     }
@@ -119,10 +120,10 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def heapIncreaseKey(
-                       A: Array[(Int, (Long, Long), Int)],
-                       i: Int,
-                       key: (Int, (Long, Long), Int)
-                     ): Array[(Int, (Long, Long), Int)] = {
+                                    A: Array[(Int, (Long, Long), Int)],
+                                    i: Int,
+                                    key: (Int, (Long, Long), Int)
+                                  ): Array[(Int, (Long, Long), Int)] = {
     if (compare(key._2, A(i - 1)._2) > 0) {
     }
     val AA = A.clone()
@@ -138,15 +139,15 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def minHeapInsert(
-                     A: Array[(Int, (Long, Long), Int)],
-                     key: (Int, (Long, Long), Int)
-                   ): Array[(Int, (Long, Long), Int)] = {
+                                  A: Array[(Int, (Long, Long), Int)],
+                                  key: (Int, (Long, Long), Int)
+                                ): Array[(Int, (Long, Long), Int)] = {
     val AA = Array.concat(A, Array(key).map(x => (x._1, (Long.MaxValue, Long.MaxValue), x._3)))
     heapIncreaseKey(AA, AA.length, key)
   }
 
   private[sql] def buildMinHeap(
-    A: Array[(Int, (Long, Long), Int)]): Array[(Int, (Long, Long), Int)] = {
+                                 A: Array[(Int, (Long, Long), Int)]): Array[(Int, (Long, Long), Int)] = {
     var AA = A.clone()
     for (i <- (1 until Math.floor(AA.length / 2).toInt + 1).reverse) {
       AA = minHeapify(AA, i)
@@ -155,16 +156,16 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def calculateVsl(
-                    U: Int,
-                    l: Int,
-                    indexNum: scala.collection.Map[(Int, Boolean), Long],
-                    record: String,
-                    threshold: Int,
-                    numPartition: Int,
-                    topDegree: Int,
-                    P: Map[(Int, Int), Int],
-                    L: Map[(Int, Int), Int]
-                  ): Array[Int] = {
+                                 U: Int,
+                                 l: Int,
+                                 indexNum: scala.collection.Map[(Int, Boolean), Long],
+                                 record: String,
+                                 threshold: Int,
+                                 numPartition: Int,
+                                 topDegree: Int,
+                                 P: Map[(Int, Int), Int],
+                                 L: Map[(Int, Int), Int]
+                               ): Array[Int] = {
 
     val sLength = record.length
 
@@ -379,7 +380,7 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def part(
-    content: InternalRow, s: String, threshold: Int): Array[(Int, ValueInfo)] = {
+                         content: InternalRow, s: String, threshold: Int): Array[(Int, ValueInfo)] = {
     var ss = ArrayBuffer[(Int, ValueInfo)]()
     val U: Int = threshold
     val l = s.length
@@ -444,24 +445,34 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def parts(
-            content: InternalRow,
-            s: String,
-            indexNum1: scala.collection.Map[(Int, Boolean), Long],
-            L: Map[(Int, Int), Int],
-            P: Map[(Int, Int), Int],
-            threshold: Int,
-            max: Int): Array[(Int, ValueInfo)] = {
+                          content: InternalRow,
+                          s: String,
+                          indexNum1: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
+                          L: Broadcast[Map[(Int, Int), Int]],
+                          P: Broadcast[Map[(Int, Int), Int]],
+                          threshold: Int,
+                          max: Int): Array[(Int, ValueInfo)] = {
     val result = ArrayBuffer[(Int, ValueInfo)]()
     val sLength = s.length
     val lu = Math.min(sLength + threshold, max)
     val lo = Math.max(sLength - threshold, threshold + 1)
     val U = threshold
     for (l <- lo until lu + 1) {
-      val V = calculateVsl(U, l, indexNum1, s, threshold, num_partitions, topDegree, P, L)
+      val V = calculateVsl(U,
+        l,
+        indexNum1.value,
+        s,
+        threshold,
+        num_partitions,
+        topDegree,
+        P.value,
+        L.value)
       for (i <- 1 until U + 2) {
-        val lowerBound = Math.max(P(l, i) - (i - 1), P(l, i) - (l - sLength + (U + 1 - i)))
-        val upperBound = Math.min(P(l, i) + sLength - l + U + 1 - i, P(l, i) + i - 1)
-        val length = L(l, i)
+        val lowerBound = Math.max(P.value(l, i) - (i - 1),
+          P.value(l, i) - (l - sLength + (U + 1 - i)))
+        val upperBound = Math.min(P.value(l, i) + sLength - l + U + 1 - i,
+          P.value(l, i) + i - 1)
+        val length = L.value(l, i)
         for (x <- lowerBound until upperBound + 1) {
           if (V(i - 1) == 1) {
             val seg = {
@@ -485,35 +496,22 @@ case class EditDistanceSimilarityJoin(
     result.toArray
   }
 
-  private[sql] def EDdistance(a: String, b: String): Int = {
-    val str1 = a
-    val str2 = b
-    val lenStr1 = str1.length
-    val lenStr2 = str2.length
-    val edit = Array.ofDim[Int](lenStr1, lenStr2)
-    for (i <- 0 until lenStr1) {
-      edit(i)(0) = i
-    }
-    for (j <- 0 until lenStr2) {
-      edit(0)(j) = j
+
+  private def EDdistance(s1: String, s2: String): Int = {
+    val dist = Array.tabulate(s2.length + 1, s1.length + 1) {
+      (j, i) => if (j == 0) i else if (i == 0) j else 0
     }
 
-    for (i <- 1 until lenStr1) {
-      for (j <- 1 until lenStr2) {
-        edit(i)(j) = Math.min(edit(i - 1)(j) + 1, edit(i)(j - 1) + 1)
-        if (str1(i - 1) == str2(j - 1)) {
-          edit(i)(j) = Math.min(edit(i)(j), edit(i - 1)(j - 1))
-        } else {
-          edit(i)(j) = Math.min(edit(i)(j), edit(i - 1)(j - 1) + 1)
-        }
-      }
-    }
-    return edit(lenStr1 - 1)(lenStr2 - 1)
+    for (j <- 1 to s2.length; i <- 1 to s1.length)
+      dist(j)(i) = if (s2(j - 1) == s1(i - 1)) dist(j - 1)(i - 1)
+      else math.min(math.min(dist(j - 1)(i) + 1, dist(j)(i - 1) + 1), dist(j - 1)(i - 1) + 1)
+
+    dist(s2.length)(s1.length)
   }
 
   private[sql] def calculateAllL(min: Int,
-                    max: Int,
-                    threshold: Int): Map[(Int, Int), Int] = {
+                                 max: Int,
+                                 threshold: Int): Map[(Int, Int), Int] = {
     val result = Map[(Int, Int), Int]()
     for (l <- min until max + 1) {
       for (i <- 1 until threshold + 2) {
@@ -524,13 +522,13 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def calculateAllP(min: Int,
-                    max: Int,
-                    L: scala.collection.Map[(Int, Int), Int],
-                    threshold: Int): Map[(Int, Int), Int] = {
+                                 max: Int,
+                                 L: Broadcast[scala.collection.mutable.Map[(Int, Int), Int]],
+                                 threshold: Int): Map[(Int, Int), Int] = {
     val result = Map[(Int, Int), Int]()
     for (l <- min until max + 1) {
       for (i <- 1 until threshold + 2) {
-        result += ((l, i) -> Pij(l, i, L))
+        result += ((l, i) -> Pij(l, i, L.value))
       }
     }
     result
@@ -546,7 +544,7 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def compareSimilarity(
-    query: ValueInfo, index: ValueInfo, threshold: Int): Boolean = {
+                                      query: ValueInfo, index: ValueInfo, threshold: Int): Boolean = {
     val queryHash = query.record.hashCode
     val indexHash = index.record.hashCode
     logInfo(s"compare: " + query.record + " and " + index.record)
@@ -569,8 +567,7 @@ case class EditDistanceSimilarityJoin(
   override protected def doExecute(): RDD[InternalRow] = {
     logInfo(s"execute EdSimilarityJoin")
 
-    val left_rdd = left.execute().map(row =>
-    {
+    val left_rdd = left.execute().map(row => {
       val key = BindReferences
         .bindReference(left_keys, left.output)
         .eval(row)
@@ -579,8 +576,7 @@ case class EditDistanceSimilarityJoin(
       (key, row.copy())
     })
 
-    val right_rdd = right.execute().map(row =>
-    {
+    val right_rdd = right.execute().map(row => {
       val key = BindReferences
         .bindReference(right_keys, right.output)
         .eval(row)
@@ -606,7 +602,7 @@ case class EditDistanceSimilarityJoin(
     val partitionL = sparkContext
       .broadcast(calculateAllL(1, maxLength.value, threshold))
     val partitionP = sparkContext
-      .broadcast(calculateAllP(1, maxLength.value, partitionL.value, threshold))
+      .broadcast(calculateAllP(1, maxLength.value, partitionL, threshold))
 
     val index_rdd = record
       .map(x => (x._1.length, x._1, x._2))
@@ -634,7 +630,7 @@ case class EditDistanceSimilarityJoin(
     val index_partitioned_rdd = new SimilarityRDD(
       index_rdd.partitionBy(
         new SimilarityHashPartitioner(
-          num_partitions, partitionTable.value)), true)
+          num_partitions, partitionTable)), true)
 
     val index_indexed_rdd =
       index_partitioned_rdd
@@ -656,7 +652,7 @@ case class EditDistanceSimilarityJoin(
       .map(x => (x._1.length, x._1, x._2))
       .flatMap(
         x => parts(
-          x._3, x._2, frequencyTable.value, partitionL.value, partitionP.value, threshold, maxLength.value))
+          x._3, x._2, frequencyTable, partitionL, partitionP, threshold, maxLength.value))
       .map(x => (x._1, x._2))
       .persist(StorageLevel.DISK_ONLY)
 
@@ -702,7 +698,7 @@ case class EditDistanceSimilarityJoin(
     val query_partitioned_rdd = new SimilarityRDD(query_rdd
       .partitionBy(
         new SimilarityQueryPartitioner(
-          num_partitions, partitionTable.value, frequencyTable.value, maxPartitionId.value)), true)
+          num_partitions, partitionTable, frequencyTable, maxPartitionId.value)), true)
       .persist(StorageLevel.MEMORY_AND_DISK_SER)
 
     query_partitioned_rdd.count

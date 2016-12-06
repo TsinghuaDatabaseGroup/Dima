@@ -47,30 +47,16 @@ class EdIndex() extends Index with Serializable {
     }
   }
 
-  private def EDdistance(a: String, b: String): Int = {
-    val str1 = a
-    val str2 = b
-    val lenStr1 = str1.length
-    val lenStr2 = str2.length
-    val edit = Array.ofDim[Int](lenStr1, lenStr2)
-    for (i <- 0 until lenStr1) {
-      edit(i)(0) = i
-    }
-    for (j <- 0 until lenStr2) {
-      edit(0)(j) = j
+  private def EDdistance(s1: String, s2: String): Int = {
+    val dist = Array.tabulate(s2.length + 1, s1.length + 1) {
+      (j, i) => if (j == 0) i else if (i == 0) j else 0
     }
 
-    for (i <- 1 until lenStr1) {
-      for (j <- 1 until lenStr2) {
-        edit(i)(j) = Math.min(edit(i - 1)(j) + 1, edit(i)(j - 1) + 1)
-        if (str1(i - 1) == str2(j - 1)) {
-          edit(i)(j) = Math.min(edit(i)(j), edit(i - 1)(j - 1))
-        } else {
-          edit(i)(j) = Math.min(edit(i)(j), edit(i - 1)(j - 1) + 1)
-        }
-      }
-    }
-    return edit(lenStr1 - 1)(lenStr2 - 1)
+    for (j <- 1 to s2.length; i <- 1 to s1.length)
+      dist(j)(i) = if (s2(j - 1) == s1(i - 1)) dist(j - 1)(i - 1)
+      else math.min(math.min(dist(j - 1)(i) + 1, dist(j)(i - 1) + 1), dist(j - 1)(i - 1) + 1)
+
+    dist(s2.length)(s1.length)
   }
 
   def init(threshold: Int,

@@ -17,6 +17,7 @@
 
 package org.apache.spark.sql.execution.joins
 
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
@@ -380,10 +381,10 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
 
   private[sql] def partition_r(
                            ss1: String,
-                           indexNum: scala.collection.Map[(Int, Boolean), Long],
-                           partitionTable: scala.collection.Map[Int, Int],
+                           indexNum: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
+                           partitionTable: Broadcast[scala.collection.immutable.Map[Int, Int]],
                            minimum: Int,
-                           group: Array[(Int, Int)],
+                           group: Broadcast[Array[(Int, Int)]],
                            threshold: Double,
                            alpha: Double,
                            partitionNum: Int,
@@ -396,7 +397,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
         Int)])]()
     val ss = ss1.split(" ")
     val s = ss.size
-    val range = group
+    val range = group.value
       .filter(x => {
         x._1 <= Math.floor(s / threshold).toInt && x._2 >= (Math.ceil(threshold * s) + 0.0001).toInt
       })
@@ -424,8 +425,8 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
 
       val V = calculateVsl(s,
         l,
-        indexNum,
-        partitionTable,
+        indexNum.value,
+        partitionTable.value,
         substring,
         H,
         minimum,
@@ -468,12 +469,12 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
   }
 
   private[sql] def createInverse(ss1: String,
-                            group: Array[(Int, Int)],
+                            group: Broadcast[Array[(Int, Int)]],
                             threshold: Double
                            ): Array[(String, Int, Int)] = {
     {
       val ss = ss1.split(" ")
-      val range = group.filter(
+      val range = group.value.filter(
         x => (x._1 <= ss.length && x._2 >= ss.length)
       )
       val sl = range(range.length - 1)._1
@@ -672,7 +673,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
 
     val splittedRecord = record
       .map(x => {
-        ((x._1, x._2), createInverse(x._1, multiGroup.value, threshold))
+        ((x._1, x._2), createInverse(x._1, multiGroup, threshold))
       })
       .flatMapValues(x => x)
       .map(x => ((x._1, x._2._2, x._2._3), x._2._1))
@@ -711,7 +712,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     )
 
     val indexPartitionedRDD = new SimilarityRDD(index
-      .partitionBy(new SimilarityHashPartitioner(num_partitions, partitionTable.value)), true)
+      .partitionBy(new SimilarityHashPartitioner(num_partitions, partitionTable)), true)
 
     val index_rdd_indexed = indexPartitionedRDD.mapPartitionsWithIndex((partitionId, iter) => {
       val data = iter.toArray
@@ -721,7 +722,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
         data.
           map(x => (((x._2._1._1.hashCode,
             x._2._1._2,
-            createInverse(x._2._1._1, multiGroup.value, threshold)
+            createInverse(x._2._1._1, multiGroup, threshold)
               .map(x => (x._1.split(" ").map(s => s.hashCode), Array[Boolean]()))),
             x._2._2))))).iterator
     }).persist(StorageLevel.MEMORY_AND_DISK_SER)
@@ -733,7 +734,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       .distinct
       .map(x => ((x._1.hashCode, x._2),
         partition_r(
-          x._1, frequencyTable.value, partitionTable.value, minimum.value, multiGroup.value,
+          x._1, frequencyTable, partitionTable, minimum.value, multiGroup,
           threshold, alpha, num_partitions, topDegree
         )))
       .flatMapValues(x => x)
@@ -791,7 +792,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       query_rdd
         .partitionBy(
           new SimilarityQueryPartitioner(
-            num_partitions, partitionTable.value, frequencyTable.value, maxPartitionId.value)
+            num_partitions, partitionTable, frequencyTable, maxPartitionId.value)
         ), true
     )
       .persist(StorageLevel.MEMORY_AND_DISK_SER)

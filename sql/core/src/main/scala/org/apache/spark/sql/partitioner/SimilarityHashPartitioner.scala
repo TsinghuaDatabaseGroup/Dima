@@ -19,9 +19,10 @@ package org.apache.spark.sql.partitioner
   * Created by sunji on 16/10/15.
   */
 import org.apache.spark.Partitioner
+import org.apache.spark.broadcast.Broadcast
 
 class SimilarityHashPartitioner(numParts: Int,
-                                frequencyTable: scala.collection.Map[Int, Int]
+                                frequencyTable: Broadcast[scala.collection.immutable.Map[Int, Int]]
                                ) extends Partitioner {
 
   override def numPartitions: Int = numParts
@@ -35,7 +36,7 @@ class SimilarityHashPartitioner(numParts: Int,
   }
   override def getPartition(key: Any): Int = {
     val k = key.hashCode()
-    frequencyTable.getOrElse(k, hashStrategy(k))
+    frequencyTable.value.getOrElse(k, hashStrategy(k))
   }
   override def equals(other: Any): Boolean = other match {
     case similarity: SimilarityHashPartitioner =>

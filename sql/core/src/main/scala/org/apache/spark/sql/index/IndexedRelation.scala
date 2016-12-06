@@ -431,7 +431,7 @@ private[sql] case class JaccardIndexIndexedRelation(
       f.collectAsMap()
     )
 
-    val partitionTable = Array[(Int, Int)]().toMap
+    val partitionTable = child.sparkContext.broadcast(Array[(Int, Int)]().toMap)
 
     val partitionedRDD = new SimilarityRDD(index
       .partitionBy(new SimilarityHashPartitioner(numPartitions, partitionTable)), true)
@@ -641,7 +641,7 @@ private[sql] case class EdIndexIndexedRelation(
     val index_partitioned_rdd = new SimilarityRDD(
       index_rdd.partitionBy(
         new SimilarityHashPartitioner(
-          num_partitions, partitionTable.value)), true)
+          num_partitions, partitionTable)), true)
 
     val indexed =
       index_partitioned_rdd

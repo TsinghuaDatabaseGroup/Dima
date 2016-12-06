@@ -17,13 +17,14 @@
 package org.apache.spark.sql.partitioner
 
 import org.apache.spark.Partitioner
+import org.apache.spark.broadcast.Broadcast
 
 /**
   * Created by sunji on 16/11/16.
   */
 class SimilarityQueryPartitioner(numParts: Int,
-                                 partitionTable: scala.collection.Map[Int, Int],
-                                 frequencyTable: scala.collection.Map[(Int, Boolean), Long],
+                                 partitionTable: Broadcast[scala.collection.immutable.Map[Int, Int]],
+                                 frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
                                  maxPartitionId: Array[Int]
                                 ) extends Partitioner {
 
@@ -51,10 +52,10 @@ class SimilarityQueryPartitioner(numParts: Int,
 
   override def getPartition(key: Any): Int = {
     val k = key.hashCode()
-    val id = partitionTable.getOrElse(k, hashStrategy(k))
+    val id = partitionTable.value.getOrElse(k, hashStrategy(k))
     if (Has(id, maxPartitionId)) {
       // random partition
-      val delta = frequencyTable.getOrElse((k, true), 0.toLong) + frequencyTable.getOrElse((k, false), 0.toLong)
+      val delta = frequencyTable.value.getOrElse((k, true), 0.toLong) + frequencyTable.value.getOrElse((k, false), 0.toLong)
       var min = Long.MaxValue
       var toId = -1
       for (i <- 0 until numPartitions) {
@@ -66,8 +67,8 @@ class SimilarityQueryPartitioner(numParts: Int,
       distr(toId) += delta
       toId
     } else {
-      val delta = frequencyTable
-        .getOrElse((k, true), 0.toLong) + frequencyTable.getOrElse((k, false), 0.toLong)
+      val delta = frequencyTable.value
+        .getOrElse((k, true), 0.toLong) + frequencyTable.value.getOrElse((k, false), 0.toLong)
       distr(id) += delta
       id
     }

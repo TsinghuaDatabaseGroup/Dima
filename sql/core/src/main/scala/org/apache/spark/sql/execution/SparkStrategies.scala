@@ -359,10 +359,11 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
 
   object IndexRelationScans extends Strategy with PredicateHelper{
     import org.apache.spark.sql.catalyst.expressions._
-    lazy val indexInfos = sqlContext.indexManager.getIndexInfo
+    var indexInfos = sqlContext.indexManager.getIndexInfo
     // lookup
     def lookupIndexInfo(attributes: Seq[Attribute]): IndexInfo = {
       var result: IndexInfo = null
+      indexInfos = sqlContext.indexManager.getIndexInfo
       indexInfos.foreach(item => {
         if (item.indexType == RTreeType){
           val temp = item.attributes
