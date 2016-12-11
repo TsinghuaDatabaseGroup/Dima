@@ -2544,5 +2544,8 @@
     <profile>
       <id>sparkr</id>
     </profile>
+    <profile>
+      <id>zeyuan-dev</id>
+    </profile>
   </profiles>
 </project>
