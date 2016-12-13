@@ -34,6 +34,7 @@ import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow, ScalaReflection, SqlParser}
 import org.apache.spark.sql.execution.datasources.json.JacksonGenerator
 import org.apache.spark.sql.execution.datasources.{CreateTableUsingAsSelect, LogicalRelation}
+import org.apache.spark.sql.execution.joins.JaccardSimilarityJoin
 import org.apache.spark.sql.execution.{EvaluatePython, ExplainCommand, FileRelation, LogicalRDD, QueryExecution, Queryable, SQLExecution}
 import org.apache.spark.sql.index.IndexType
 import org.apache.spark.sql.sources.HadoopFsRelation
@@ -1181,6 +1182,7 @@ class DataFrame private[sql](
   /**
     * a private auxiliary function to extract Attribute information from an input string
     * object.
+    *
     * @param keys  An array of String input by user
     * @param attrs A Seq of Attributes in which to search
     * @return An Array of Attribute extracted from the String
@@ -1287,6 +1289,25 @@ class DataFrame private[sql](
               rightKeys: PointFromColumn, k: Int): DataFrame = withPlan {
     Join(this.logicalPlan, right.logicalPlan, KNNJoin,
       Some(InKNN(rightKeys.cols.map(_.expr), leftKeys.cols.map(_.expr), Literal(k))))
+  }
+
+  /**
+    * Dima Join
+    */
+  def edJoin(right: DataFrame, leftKeys: Array[String],
+                  rightKeys: Array[String], delta: Int) : DataFrame = withPlan {
+    val leftAttrs = getAttributes(leftKeys)
+    val rightAttrs = getAttributes(rightKeys, right.queryExecution.analyzed.output)
+    Join(this.logicalPlan, right.logicalPlan, SimilarityJoin,
+      Some(EdSimilarity(leftAttrs.head, rightAttrs.head, Literal(delta))))
+  }
+
+  def jaccardJoin(right: DataFrame, leftKeys: Array[String],
+                  rightKeys: Array[String], delta: Double) : DataFrame = withPlan {
+    val leftAttrs = getAttributes(leftKeys)
+    val rightAttrs = getAttributes(rightKeys, right.queryExecution.analyzed.output)
+    Join(this.logicalPlan, right.logicalPlan, SimilarityJoin,
+      Some(JaccardSimilarity(leftAttrs.head, rightAttrs.head, Literal(delta))))
   }
 
   /**

@@ -1,0 +1,10 @@
+sigmod
+vldb
+icde
+tods
+tkde
+sigmod 1
+vldb 1
+icde 1
+tods 1
+tkde 1

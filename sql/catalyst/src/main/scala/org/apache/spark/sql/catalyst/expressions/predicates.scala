@@ -344,8 +344,7 @@ case class JaccardSimilarity(string: Expression,
     val eval_target = target.eval(input).toString
     val eval_delta = delta.value.asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
 
-//    JaccardSimilarity.jaccardSimilarity(eval_string, eval_target) <= eval_delta
-    true
+    JaccardSimilarity.jaccardSimilarity(eval_string, eval_target) <= eval_delta
   }
 }
 
