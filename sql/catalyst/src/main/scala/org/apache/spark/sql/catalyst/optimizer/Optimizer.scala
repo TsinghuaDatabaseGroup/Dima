@@ -21,7 +21,7 @@ import org.apache.spark.sql.catalyst.analysis.{CleanupAliases, EliminateSubQueri
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate._
 import org.apache.spark.sql.catalyst.plans.logical._
-import org.apache.spark.sql.catalyst.plans.{Inner, LeftOuter, LeftSemi, RightOuter}
+import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.rules._
 import org.apache.spark.sql.types._
 
@@ -59,7 +59,9 @@ object DefaultOptimizer extends Optimizer {
       RemoveDispensableExpressions,
       SimplifyFilters,
       SimplifyCasts,
-      SimplifyCaseConversionExpressions) ::
+      SimplifyCaseConversionExpressions,
+      // CBO
+      ChangeJoinOrder) ::
     Batch("Decimal Optimizations", FixedPoint(100),
       DecimalAggregates) ::
     Batch("LocalRelation", FixedPoint(100),
@@ -722,7 +724,8 @@ object PushPredicateThroughJoin extends Rule[LogicalPlan] with PredicateHelper {
   /**
    * Splits join condition expressions into three categories based on the attributes required
    * to evaluate them.
-   * @return (canEvaluateInLeft, canEvaluateInRight, haveToEvaluateInBoth)
+    *
+    * @return (canEvaluateInLeft, canEvaluateInRight, haveToEvaluateInBoth)
    */
   private def split(condition: Seq[Expression], left: LogicalPlan, right: LogicalPlan) = {
     val (leftEvaluateCondition, rest) =
@@ -914,5 +917,47 @@ object RemoveLiteralFromGroupExpressions extends Rule[LogicalPlan] {
     case a @ Aggregate(grouping, _, _) =>
       val newGrouping = grouping.filter(!_.foldable)
       a.copy(groupingExpressions = newGrouping)
+  }
+}
+
+/*
+ * CBO: Change Join Order
+ */
+object ChangeJoinOrder extends Rule[LogicalPlan] {
+  def apply(plan: LogicalPlan): LogicalPlan = plan transform {
+    case f @ Join(left, right, SimilarityJoin, joinCondition) =>
+      left match {
+        case Join(left_left, left_right, SimilarityJoin, left_joinCondition) => {
+          logInfo(s"LEFT_LEFT_SIZE: ${left_left.statistics.sizeInBytes}")
+          logInfo(s"LEFT_RIGHT_SIZE: ${left_right.statistics.sizeInBytes}")
+          logInfo(s"RIGHT_SIZE: ${right.statistics.sizeInBytes}")
+          val left_joinConditionDelta = left_joinCondition.get.children(2)
+            .asInstanceOf[Literal].value
+            .asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
+          val joinConditionDelta = joinCondition.get.children(2)
+            .asInstanceOf[Literal].value
+            .asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
+          logInfo(s"Delta1: ${left_joinConditionDelta}")
+          logInfo(s"Delta2: ${joinConditionDelta}")
+
+          val estimation1 = math.max(left_left.statistics.sizeInBytes.toDouble,
+            left_right.statistics.sizeInBytes.toDouble) * left_joinConditionDelta
+          val estimation2 = math.max(left_right.statistics.sizeInBytes.toDouble,
+            right.statistics.sizeInBytes.toDouble) * joinConditionDelta
+
+          logInfo(s"Estimation1: ${estimation1}")
+          logInfo(s"Estimation2: ${estimation2}")
+
+          if (estimation1 > estimation2) {
+            logInfo("CBO: Change Join Order")
+            val new_left = left_left
+            val new_right = Join(left_right, right, SimilarityJoin, joinCondition)
+            Join(new_left, new_right, SimilarityJoin, left_joinCondition)
+          } else {
+            f
+          }
+        }
+        case _ => f
+      }
   }
 }

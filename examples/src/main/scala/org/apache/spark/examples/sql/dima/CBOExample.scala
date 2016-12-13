@@ -18,17 +18,17 @@
 // scalastyle:off println
 package org.apache.spark.examples.sql.dima
 
-import org.apache.spark.{SparkContext, SparkConf}
 import org.apache.spark.sql.SQLContext
+import org.apache.spark.{SparkContext, SparkConf}
 
 /**
-  * Created by zeyuan.shang on 12/12/16.
+  * Created by zeyuan.shang on 12/13/16.
   */
-object DataFrameExample {
-  case class Record(value: String)
+object CBOExample {
+  case class Record(record: String)
 
   def main(args: Array[String]): Unit = {
-    val sparkConf = new SparkConf().setAppName("DataFrameExample").setMaster("local[2]")
+    val sparkConf = new SparkConf().setAppName("CBOExample").setMaster("local[2]")
     val sc = new SparkContext(sparkConf)
     val sqlContext = new SQLContext(sc)
 
@@ -38,10 +38,17 @@ object DataFrameExample {
       .map(new Record(_)).toDF()
     val s2 = sc.textFile("./examples/src/main/resources/string.txt")
       .map(new Record(_)).toDF()
+    val s3 = sc.textFile("./examples/src/main/resources/string.txt")
+      .map(new Record(_)).toDF()
 
-    s1.edJoin(s2, Array("value"), Array("value"), 1).collect().foreach(println)
+    s1.registerTempTable("Record1")
+    s2.registerTempTable("Record2")
+    s3.registerTempTable("Record3")
 
-    s1.jaccardJoin(s2, Array("value"), Array("value"), 0.8).collect().foreach(println)
+    val res = sqlContext.sql("select distinct * from Record1 " +
+      "SIMILARITY join Record2 on JACCARDSIMILARITY(Record1.record, Record2.record) >= 0.7 " +
+      "SIMILARITY join Record3 on JACCARDSIMILARITY(Record2.record, Record3.record) >= 0.5")
+    res.collect().foreach(println)
 
     sc.stop()
   }

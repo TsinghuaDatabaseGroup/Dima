@@ -630,6 +630,9 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
 
   override protected def doExecute(): RDD[InternalRow] = {
     logInfo(s"execute JaccardSelfSimilarityJoin")
+    logInfo(s"LEFT: ${left}")
+    logInfo(s"RIGHT: ${right}")
+
     val left_rdd = left.execute().map(row =>
     {
       val key = BindReferences
