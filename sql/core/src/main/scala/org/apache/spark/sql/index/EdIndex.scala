@@ -71,6 +71,22 @@ class EdIndex() extends Index with Serializable {
     index += (key -> (position :: index.getOrElse(key, List())))
   }
 
+  def sampleSelectivity(data: Array[ValueInfo],
+                        key: Array[(Int, ValueInfo)],
+                        t: Int, sampleRate: Double): Double = {
+    val sampledKey: Seq[(Int, ValueInfo)] = {
+      for (i <- 1 to math.max(1, (sampleRate * key.length).toInt);
+           r = (Math.random * key.size).toInt) yield key(r)
+    }
+    var selectivity = (0, 0.0)
+    for (query <- sampledKey) {
+      val positionSize = index.getOrElse(query._1, List()).length.toDouble
+      selectivity = (selectivity._1 + 1, selectivity._2 + positionSize / data.size)
+    }
+
+    selectivity._2 / math.max(1.0, selectivity._1)
+  }
+
   def findIndex(data: Array[ValueInfo],
                 key: Array[(Int, ValueInfo)],
                 t: Int): Array[InternalRow] = {
@@ -83,6 +99,22 @@ class EdIndex() extends Index with Serializable {
         //          println(s"Found in Index")
         if (compareSimilarity(query._2, data(p), t)) {
           ans += data(p).content
+        }
+      }
+    }
+    ans.toArray
+  }
+
+  def sequentialScan(data: Array[ValueInfo],
+                key: Array[(Int, ValueInfo)],
+                t: Int): Array[InternalRow] = {
+
+    val ans = mutable.ListBuffer[InternalRow]()
+
+    for (query <- key) {
+      for (entry <- data) {
+        if (compareSimilarity(query._2, entry, t)) {
+          ans += entry.content
         }
       }
     }

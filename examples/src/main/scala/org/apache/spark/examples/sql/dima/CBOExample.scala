@@ -50,6 +50,11 @@ object CBOExample {
       "SIMILARITY join Record3 on JACCARDSIMILARITY(Record2.record, Record3.record) >= 0.5")
     res.collect().foreach(println)
 
+    sqlContext.sql("CREATE INDEX jaccard ON Record1(record) USE JACCARDINDEX")
+    val res2 = sqlContext.sql("select distinct * from Record1 " +
+      "where JACCARDSIMILARITY(Record1.record, \"vldb\") >= 0.5")
+    res2.collect().foreach(println)
+
     sc.stop()
   }
 }
