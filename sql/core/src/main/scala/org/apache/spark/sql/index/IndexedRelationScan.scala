@@ -314,10 +314,18 @@ private[sql] case class IndexedRelationScan(
                   if (sendOut.length == 0) {
                     Array[InternalRow]().iterator
                   } else {
-                    index.findIndex(packed.data,
-                      sendOut,
-                      delta.toDouble)
-                      .iterator
+                    val selectivity = index.sampleSelectivity(packed.data,
+                      sendOut, delta.toDouble, 0.001)
+                    if (selectivity > 0.8) {
+                      index.sequentialScan(packed.data,
+                        sendOut,
+                        delta.toDouble).iterator
+                    } else {
+                      index.findIndex(packed.data,
+                        sendOut,
+                        delta.toDouble)
+                        .iterator
+                    }
                   }
                 } else Array[InternalRow]().iterator
               })
@@ -363,6 +371,7 @@ private[sql] case class IndexedRelationScan(
                   if (sendOut.length == 0) {
                     Array[InternalRow]().iterator
                   } else {
+
                     index.findIndex(packed.data,
                       sendOut,
                       delta.toInt)

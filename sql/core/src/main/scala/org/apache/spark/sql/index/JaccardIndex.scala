@@ -190,6 +190,27 @@ class JaccardIndex() extends Index with Serializable {
     index += (key -> (position :: index.getOrElse(key, List())))
   }
 
+  def sampleSelectivity(data: Array[((Int, InternalRow,
+                              Array[(Array[Int], Array[Boolean])]), Boolean)],
+                        key: Array[(Array[(Array[Int], Array[Boolean])],
+                          Array[(Int, Boolean, Array[Boolean], Boolean, Int)])],
+                        t: Double, sampleRate: Double): Double = {
+    val sampledKey: Seq[(Array[(Array[Int], Array[Boolean])],
+      Array[(Int, Boolean, Array[Boolean], Boolean, Int)])] = {
+      for (i <- 1 to math.max(1, (sampleRate * key.length).toInt);
+           r = (Math.random * key.size).toInt) yield key(r)
+    }
+    var selectivity = (0, 0.0)
+    for (query <- sampledKey) {
+      for (i <- query._2) {
+        val positionSize = index.getOrElse(i._1, List()).length.toDouble
+        selectivity = (selectivity._1 + 1, selectivity._2 + positionSize / data.size)
+      }
+    }
+
+    selectivity._2 / math.max(1.0, selectivity._1)
+  }
+
   def findIndex(data: Array[((Int, InternalRow, Array[(Array[Int], Array[Boolean])]), Boolean)],
                 key: Array[(Array[(Array[Int], Array[Boolean])],
                   Array[(Int, Boolean, Array[Boolean], Boolean, Int)])],
@@ -206,6 +227,28 @@ class JaccardIndex() extends Index with Serializable {
           val Ind = (data(p)._1._3, data(p)._2)
           if (compareSimilarity(que, Ind)) {
             ans += data(p)._1._2
+          }
+        }
+      }
+    }
+    ans.toArray
+  }
+
+  def sequentialScan(data: Array[((Int, InternalRow,
+                          Array[(Array[Int], Array[Boolean])]), Boolean)],
+                key: Array[(Array[(Array[Int], Array[Boolean])],
+                  Array[(Int, Boolean, Array[Boolean], Boolean, Int)])],
+                t: Double): Array[InternalRow] = {
+
+    val ans = mutable.ListBuffer[InternalRow]()
+
+    for (query <- key) {
+      for (i <- query._2) {
+        for (entry <- data) {
+          val que = (query._1, i._2, i._3, i._4, i._5)
+          val Ind = (entry._1._3, entry._2)
+          if (compareSimilarity(que, Ind)) {
+            ans += entry._1._2
           }
         }
       }
