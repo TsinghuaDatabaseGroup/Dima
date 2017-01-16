@@ -17,6 +17,7 @@
 
 package org.apache.spark.sql.index
 
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
@@ -259,24 +260,22 @@ private[sql] case class IPartition(partitionId: Int,
                                      Array[(Array[Int], Array[Boolean])]),
                                      Boolean)])
 
-private[sql] abstract class IndexedRelationForJaccard extends LogicalPlan {
-  self: Product =>
-  var _indexedRDD: RDD[IPartition]
-  def indexedRDD: RDD[IPartition] = _indexedRDD
-
-  override def children: Seq[LogicalPlan] = Nil
-  def output: Seq[Attribute]
-
-  def withOutput(newOutput: Seq[Attribute]): IndexedRelation
-}
+private[sql] case class IndexGlobalInfo(threshold: Double,
+                           frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
+                           multiGroup: Broadcast[Array[(Int, Int)]],
+                           minimum: Int,
+                           alpha: Double,
+                           partitionNum: Int,
+                           threshold_base: Double) extends Serializable
 
 private[sql] case class JaccardIndexIndexedRelation(
-                                                     output: Seq[Attribute],
-                                                     child: SparkPlan,
-                                                     table_name: Option[String],
-                                                     column_keys: List[Attribute],
-                                                     index_name: String)(var _indexedRDD: RDD[PackedPartitionWithIndex] = null,
-                                                                         var indexRDD: RDD[IPartition] = null)
+  output: Seq[Attribute],
+  child: SparkPlan,
+  table_name: Option[String],
+  column_keys: List[Attribute],
+  index_name: String)(var _indexedRDD: RDD[PackedPartitionWithIndex] = null,
+                      var indexRDD: RDD[IPartition] = null,
+                      var indexGlobalInfo: IndexGlobalInfo = null)
   extends IndexedRelation with MultiInstanceRelation {
   require(column_keys.length == 1)
   val numPartitions = child.sqlContext.conf.numSimilarityPartitions
@@ -408,14 +407,14 @@ private[sql] case class JaccardIndexIndexedRelation(
       .map(x => (x._1, createDeletion(x._2))) // (1,i,l), deletionSubstring
       .flatMapValues(x => x)
       .map(x => {
-        println(s"deletion index: " + x._2 + " " + x._1._2 + " " + x._1._3)
+//        println(s"deletion index: " + x._2 + " " + x._1._2 + " " + x._1._3)
         ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, true))
       })
     // (hashCode, (String, internalrow))
 
     val segIndexSig = splittedRecord
       .map(x => {
-        println(s"inverse index: " + x._2 + " " + x._1._2 + " " + x._1._3)
+//        println(s"inverse index: " + x._2 + " " + x._1._2 + " " + x._1._3)
         ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, false))
       })
 
@@ -433,8 +432,8 @@ private[sql] case class JaccardIndexIndexedRelation(
 
     val partitionTable = child.sparkContext.broadcast(Array[(Int, Int)]().toMap)
 
-    val partitionedRDD = new SimilarityRDD(index
-      .partitionBy(new SimilarityHashPartitioner(numPartitions, partitionTable)), true)
+    val partitionedRDD = index
+      .partitionBy(new SimilarityHashPartitioner(numPartitions, partitionTable))
 
     val indexed = partitionedRDD.mapPartitionsWithIndex((partitionId, iter) => {
       val data = iter.toArray
@@ -448,26 +447,23 @@ private[sql] case class JaccardIndexIndexedRelation(
             threshold)
         .map(x => (x._1.split(" ").map(s => s.hashCode), Array[Boolean]()))), x._2._2)))).iterator
     }).persist(StorageLevel.MEMORY_AND_DISK_SER)
+    indexed.count
+
+    indexGlobalInfo = new IndexGlobalInfo(threshold,
+      frequencyTable, multiGroup, minimum.value, alpha, numPartitions, threshold)
 
     indexed.setName(table_name.map(n => s"$n $index_name").getOrElse(child.toString))
-    indexed.count
-    child.sqlContext.indexManager.addIndexGlobalInfo(threshold,
-      frequencyTable,
-      multiGroup,
-      minimum.value,
-      alpha,
-      numPartitions, threshold)
     indexRDD = indexed
   }
 
   override def newInstance(): IndexedRelation = {
     new JaccardIndexIndexedRelation(output.map(_.newInstance()), child, table_name,
-      column_keys, index_name)(_indexedRDD, indexRDD).asInstanceOf[this.type]
+      column_keys, index_name)(_indexedRDD, indexRDD, indexGlobalInfo).asInstanceOf[this.type]
   }
 
   override def withOutput(new_output: Seq[Attribute]): IndexedRelation = {
     new JaccardIndexIndexedRelation(new_output,
-      child, table_name, column_keys, index_name)(_indexedRDD, indexRDD)
+      child, table_name, column_keys, index_name)(_indexedRDD, indexRDD, indexGlobalInfo)
   }
 
   @transient override lazy val statistics = Statistics(
@@ -487,13 +483,23 @@ private[sql] case class EPartition(partitionId: Int,
                                    index: Index,
                                    data: Array[ValueInfo])
 
+private[sql] case class EdIndexGlobalInfo(threshold: Int,
+                             frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
+                             minimum: Int,
+                             partitionNum: Int,
+                             P: Broadcast[scala.collection.mutable.Map[(Int, Int), Int]],
+                             L: Broadcast[scala.collection.mutable.Map[(Int, Int), Int]],
+                             topDegree: Int,
+                             weight: Array[Int], max: Int) extends Serializable
+
 private[sql] case class EdIndexIndexedRelation(
-                                                     output: Seq[Attribute],
-                                                     child: SparkPlan,
-                                                     table_name: Option[String],
-                                                     column_keys: List[Attribute],
-                                                     index_name: String)(var _indexedRDD: RDD[PackedPartitionWithIndex] = null,
-                                                                         var indexRDD: RDD[EPartition] = null)
+  output: Seq[Attribute],
+  child: SparkPlan,
+  table_name: Option[String],
+  column_keys: List[Attribute],
+  index_name: String)(var _indexedRDD: RDD[PackedPartitionWithIndex] = null,
+                     var indexRDD: RDD[EPartition] = null,
+                     var indexGlobalInfo: EdIndexGlobalInfo = null)
   extends IndexedRelation with MultiInstanceRelation {
   require(column_keys.length == 1)
   val num_partitions = child.sqlContext.conf.numSimilarityPartitions
@@ -652,28 +658,23 @@ private[sql] case class EdIndexIndexedRelation(
           //          Array(index.size).iterator
         })
         .persist(StorageLevel.MEMORY_AND_DISK_SER)
+    indexed.count
+
+    indexGlobalInfo = new EdIndexGlobalInfo(threshold, frequencyTable,
+      minLength.value, num_partitions, partitionP, partitionL, topDegree, weight, maxLength.value)
 
     indexed.setName(table_name.map(n => s"$n $index_name").getOrElse(child.toString))
-    indexed.count
-    child.sqlContext.indexManager.addEdIndexGlobalInfo(threshold,
-      frequencyTable,
-      minLength.value,
-      num_partitions,
-      partitionP,
-      partitionL,
-      topDegree,
-      weight, maxLength.value)
     indexRDD = indexed
   }
 
   override def newInstance(): IndexedRelation = {
     new EdIndexIndexedRelation(output.map(_.newInstance()), child, table_name,
-      column_keys, index_name)(_indexedRDD, indexRDD).asInstanceOf[this.type]
+      column_keys, index_name)(_indexedRDD, indexRDD, indexGlobalInfo).asInstanceOf[this.type]
   }
 
   override def withOutput(new_output: Seq[Attribute]): IndexedRelation = {
     new EdIndexIndexedRelation(new_output,
-      child, table_name, column_keys, index_name)(_indexedRDD, indexRDD)
+      child, table_name, column_keys, index_name)(_indexedRDD, indexRDD, indexGlobalInfo)
   }
 
   @transient override lazy val statistics = Statistics(

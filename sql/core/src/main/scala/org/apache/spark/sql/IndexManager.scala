@@ -44,23 +44,6 @@ case class IndexInfo(tableName: String, indexName: String,
                      attributes: Seq[Attribute], indexType: IndexType,
                      location: String, storageLevel: StorageLevel) extends Serializable
 
-case class IndexGlobalInfo(threshold: Double,
-                           frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
-                           multiGroup: Broadcast[Array[(Int, Int)]],
-                           minimum: Int,
-                           alpha: Double,
-                           partitionNum: Int,
-                           threshold_base: Double) extends Serializable
-
-case class EdIndexGlobalInfo(threshold: Int,
-                           frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
-                           minimum: Int,
-                           partitionNum: Int,
-                           P: Broadcast[scala.collection.mutable.Map[(Int, Int), Int]],
-                           L: Broadcast[scala.collection.mutable.Map[(Int, Int), Int]],
-                           topDegree: Int,
-                           weight: Array[Int], max: Int) extends Serializable
-
 private[sql] class IndexManager extends Logging {
   @transient
   private val indexedData = new ArrayBuffer[IndexedData]
@@ -71,43 +54,9 @@ private[sql] class IndexManager extends Logging {
   @transient
   private val indexInfos = new ArrayBuffer[IndexInfo]
 
-  @transient
-  private val indexGlobalInfos = new ArrayBuffer[IndexGlobalInfo]
-
-  @transient
-  private val EdIndexGlobalInfos = new ArrayBuffer[EdIndexGlobalInfo]
-
   def getIndexInfo: Array[IndexInfo] = indexInfos.toArray
 
   def getIndexData: Array[IndexedData] = indexedData.toArray
-
-  def getIndexGlobalInfo: Array[IndexGlobalInfo] = indexGlobalInfos.toArray
-
-  def addIndexGlobalInfo(threshold: Double,
-                         frequencyTable:
-                          Broadcast[scala.collection.Map[(Int, Boolean), Long]],
-                         multiGroup: Broadcast[Array[(Int, Int)]],
-                         minimum: Int,
-                         alpha: Double,
-                         partitionNum: Int, threshold_base: Double): Unit = {
-    indexGlobalInfos += IndexGlobalInfo(threshold,
-      frequencyTable, multiGroup, minimum, alpha, partitionNum, threshold_base)
-  }
-
-  def getEdIndexGlobalInfo: Array[EdIndexGlobalInfo] = EdIndexGlobalInfos.toArray
-
-  def addEdIndexGlobalInfo(threshold: Int,
-                         frequencyTable: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
-                         minimum: Int,
-                         partitionNum: Int,
-                         P: Broadcast[scala.collection.mutable.Map[(Int, Int), Int]],
-                         L: Broadcast[scala.collection.mutable.Map[(Int, Int), Int]],
-                         topDegree: Int,
-                         weight: Array[Int],
-                         max: Int): Unit = {
-    EdIndexGlobalInfos += EdIndexGlobalInfo(threshold,
-      frequencyTable, minimum, partitionNum, P, L, topDegree, weight, max)
-  }
 
   private def readLock[A](f: => A): A = {
     val lock = indexLock.readLock()
@@ -164,6 +113,20 @@ private[sql] class IndexManager extends Logging {
       sqlContext.sparkContext.parallelize(Array(rtreeRelation))
         .saveAsObjectFile(fileName + "/rtreeRelation")
       rtreeRelation._indexedRDD.saveAsObjectFile(fileName + "/rdd")
+    } else if (preData.indexType == JaccardIndexType) {
+      val JaccardRelation = indexedItem.indexedData.asInstanceOf[JaccardIndexIndexedRelation]
+      sqlContext.sparkContext.parallelize(Array(JaccardRelation))
+        .saveAsObjectFile(fileName + "/jaccardRelation")
+      JaccardRelation.indexRDD.saveAsObjectFile(fileName + "/rdd")
+      sqlContext.sparkContext.parallelize(Array(JaccardRelation.indexGlobalInfo))
+        .saveAsObjectFile(fileName + "/info")
+    } else if (preData.indexType == EdIndexType) {
+      val EdRelation = indexedItem.indexedData.asInstanceOf[EdIndexIndexedRelation]
+      sqlContext.sparkContext.parallelize(Array(EdRelation))
+        .saveAsObjectFile(fileName + "/edRelation")
+      EdRelation.indexRDD.saveAsObjectFile(fileName + "/rdd")
+      sqlContext.sparkContext.parallelize(Array(EdRelation.indexGlobalInfo))
+        .saveAsObjectFile(fileName + "/info")
     } else {
       val treeMapRelation = indexedItem.indexedData.asInstanceOf[TreeMapIndexedRelation]
       sqlContext.sparkContext.parallelize(Array(treeMapRelation))
@@ -180,15 +143,33 @@ private[sql] class IndexManager extends Logging {
                              fileName: String): Unit = {
     val info = sqlContext.sparkContext.objectFile[IndexInfo](fileName + "/indexInfo").collect().head
     val plan = sqlContext.sparkContext.objectFile[LogicalPlan](fileName + "/plan").collect().head
-    val rdd = sqlContext.sparkContext.objectFile[PackedPartitionWithIndex](fileName + "/rdd")
     if (info.indexType == RTreeType){
+      val rdd = sqlContext.sparkContext.objectFile[PackedPartitionWithIndex](fileName + "/rdd")
       val rtreeRelation = sqlContext.sparkContext
         .objectFile[RTreeIndexedRelation](fileName + "/rtreeRelation").collect().head
       indexedData += IndexedData(indexName, plan,
         RTreeIndexedRelation(rtreeRelation.output, rtreeRelation.child,
           rtreeRelation.table_name, rtreeRelation.column_keys,
           rtreeRelation.index_name)(rdd, rtreeRelation.global_rtree))
+    } else if (info.indexType == JaccardIndexType) {
+      val rdd = sqlContext.sparkContext.objectFile[IPartition](fileName + "/rdd")
+      val jaccardRelation = sqlContext.sparkContext
+        .objectFile[JaccardIndexIndexedRelation](fileName + "/jaccardRelation").collect().head
+      indexedData += IndexedData(indexName, plan,
+        JaccardIndexIndexedRelation(jaccardRelation.output, jaccardRelation.child,
+          jaccardRelation.table_name, jaccardRelation.column_keys,
+          jaccardRelation.index_name)(null, rdd, jaccardRelation.indexGlobalInfo))
+
+    } else if (info.indexType == EdIndexType) {
+      val rdd = sqlContext.sparkContext.objectFile[EPartition](fileName + "/rdd")
+      val edRelation = sqlContext.sparkContext
+        .objectFile[EdIndexIndexedRelation](fileName + "/edRelation").collect().head
+      indexedData += IndexedData(indexName, plan,
+        EdIndexIndexedRelation(edRelation.output, edRelation.child,
+          edRelation.table_name, edRelation.column_keys,
+          edRelation.index_name)(null, rdd, edRelation.indexGlobalInfo))
     } else {
+      val rdd = sqlContext.sparkContext.objectFile[PackedPartitionWithIndex](fileName + "/rdd")
       val treeMapRelation = sqlContext.sparkContext
         .objectFile[TreeMapIndexedRelation](fileName + "/treeMapRelation").collect().head
       indexedData += IndexedData(indexName, plan,
@@ -263,7 +244,13 @@ private[sql] class IndexManager extends Logging {
       val dataIndex = indexedData.indexWhere(cd => planToIndex.sameResult(cd.plan))
       if (dataIndex < 0) found = false
       else hasFound = true
-      indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
+      indexInfos(dataIndex).indexType match {
+        case JaccardIndexType => indexedData(dataIndex).indexedData
+          .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist(blocking)
+        case EdIndexType => indexedData(dataIndex).indexedData
+          .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist(blocking)
+        case _ => indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
+      }
       indexedData.remove(dataIndex)
       indexInfos.remove(dataIndex)
     }
@@ -278,7 +265,13 @@ private[sql] class IndexManager extends Logging {
       planToIndex.sameResult(cd.plan) && cd.name.equals(indexName)
     }
     require(dataIndex >= 0, s"Table $query or index $indexName is not indexed.")
-    indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
+    indexInfos(dataIndex).indexType match {
+      case JaccardIndexType => indexedData(dataIndex).indexedData
+        .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist(blocking)
+      case EdIndexType => indexedData(dataIndex).indexedData
+        .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist(blocking)
+      case _ => indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
+    }
     indexedData.remove(dataIndex)
     indexInfos.remove(dataIndex)
   }
@@ -296,7 +289,13 @@ private[sql] class IndexManager extends Logging {
       }
     }
     require(dataIndex >= 0, s"Table $query or Index on $column is not indexed.")
-    indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
+    indexInfos(dataIndex).indexType match {
+      case JaccardIndexType => indexedData(dataIndex).indexedData
+        .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist(blocking)
+      case EdIndexType => indexedData(dataIndex).indexedData
+        .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist(blocking)
+      case _ => indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
+    }
     indexedData.remove(dataIndex)
     indexInfos.remove(dataIndex)
   }
@@ -311,7 +310,13 @@ private[sql] class IndexManager extends Logging {
       found = dataIndex >= 0
       if (found) {
         hasFound = true
-        indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
+        indexInfos(dataIndex).indexType match {
+          case JaccardIndexType => indexedData(dataIndex).indexedData
+            .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist(blocking)
+          case EdIndexType => indexedData(dataIndex).indexedData
+            .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist(blocking)
+          case _ => indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
+        }
         indexedData.remove(dataIndex)
         indexInfos.remove(dataIndex)
       }
@@ -326,7 +331,13 @@ private[sql] class IndexManager extends Logging {
     val dataIndex = indexedData.indexWhere(cd => planToCache.sameResult(cd.plan))
     val found = dataIndex >= 0
     if (found) {
-      indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
+      indexInfos(dataIndex).indexType match {
+        case JaccardIndexType => indexedData(dataIndex).indexedData
+          .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist(blocking)
+        case EdIndexType => indexedData(dataIndex).indexedData
+          .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist(blocking)
+        case _ => indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
+      }
       indexedData.remove(dataIndex)
       indexInfos.remove(dataIndex)
     }
@@ -334,7 +345,16 @@ private[sql] class IndexManager extends Logging {
   }
 
   private[sql] def clearIndex(): Unit = writeLock {
-    indexedData.foreach(_.indexedData.indexedRDD.unpersist())
+//    indexedData.foreach({_.indexedData.indexedRDD.unpersist()})
+    for (i <- 0 until indexedData.length) {
+      indexInfos(i).indexType match {
+        case JaccardIndexType => indexedData(i).indexedData
+          .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist()
+        case EdIndexType => indexedData(i).indexedData
+          .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist()
+        case _ => indexedData(i).indexedData.indexedRDD.unpersist()
+      }
+    }
     indexedData.clear()
     indexInfos.clear()
   }

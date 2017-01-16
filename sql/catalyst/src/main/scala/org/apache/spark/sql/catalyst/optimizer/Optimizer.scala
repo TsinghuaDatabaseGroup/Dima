@@ -931,12 +931,30 @@ object ChangeJoinOrder extends Rule[LogicalPlan] {
           logInfo(s"LEFT_LEFT_SIZE: ${left_left.statistics.sizeInBytes}")
           logInfo(s"LEFT_RIGHT_SIZE: ${left_right.statistics.sizeInBytes}")
           logInfo(s"RIGHT_SIZE: ${right.statistics.sizeInBytes}")
-          val left_joinConditionDelta = left_joinCondition.get.children(2)
-            .asInstanceOf[Literal].value
-            .asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
-          val joinConditionDelta = joinCondition.get.children(2)
-            .asInstanceOf[Literal].value
-            .asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
+          val left_joinConditionDelta = {
+            try {
+              left_joinCondition.get.children(2)
+                .asInstanceOf[Literal].value
+                .asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
+            } catch {
+              case e: java.lang.ClassCastException =>
+                left_joinCondition.get.children(2)
+                  .asInstanceOf[Literal].value
+                  .asInstanceOf[java.lang.Integer].toDouble
+            }
+          }
+          val joinConditionDelta = {
+            try {
+              joinCondition.get.children(2)
+                .asInstanceOf[Literal].value
+                .asInstanceOf[org.apache.spark.sql.types.Decimal].toDouble
+            } catch {
+              case e: java.lang.ClassCastException =>
+                joinCondition.get.children(2)
+                  .asInstanceOf[Literal].value
+                  .asInstanceOf[java.lang.Integer].toDouble
+            }
+          }
           logInfo(s"Delta1: ${left_joinConditionDelta}")
           logInfo(s"Delta2: ${joinConditionDelta}")
 

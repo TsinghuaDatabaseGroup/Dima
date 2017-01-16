@@ -291,7 +291,7 @@ private[sql] case class IndexedRelationScan(
             assert(jaccardSimilarity1.length == 1)
             val target = jaccardSimilarity1.head._1
             val delta = jaccardSimilarity1.head._2.toDouble
-            val global = sqlContext.indexManager.getIndexGlobalInfo(0)
+            val global = jaccardSimilarity.indexGlobalInfo
 //            println(s"globalInfo in IndexedRelationScan is $global")
             val partitionedQuery = JaccardSimSegmentation.partition_r(
               JaccardSimSegmentation.sortByValue(target),
@@ -346,7 +346,7 @@ private[sql] case class IndexedRelationScan(
             assert(edSimilarity1.length == 1)
             val target = edSimilarity1.head._1
             val delta = edSimilarity1.head._2.toInt
-            val global = sqlContext.indexManager.getEdIndexGlobalInfo(0)
+            val global = edSimilarity.indexGlobalInfo
             //            println(s"globalInfo in IndexedRelationScan is $global")
             val partitionedQuery = EdSimSegmentation.parts(
               target,

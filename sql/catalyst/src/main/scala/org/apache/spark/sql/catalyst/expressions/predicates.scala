@@ -384,10 +384,10 @@ case class EdSimilarity(string: Expression,
   override def eval(input: InternalRow): Any = {
     val eval_string = string.eval(input).toString
     val eval_target = target.eval(input).toString
-    val eval_delta = delta.value.asInstanceOf[java.lang.Integer].toInt
+    val eval_delta = delta.value.asInstanceOf[java.lang.Integer]
 
-    //    JaccardSimilarity.jaccardSimilarity(eval_string, eval_target) <= eval_delta
-    true
+    EdSimilarity.edSimilarity(eval_string, eval_target) <= eval_delta
+//    true
   }
 }
 
