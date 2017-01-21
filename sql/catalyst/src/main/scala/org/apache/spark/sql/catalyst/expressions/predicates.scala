@@ -391,6 +391,64 @@ case class EdSimilarity(string: Expression,
   }
 }
 
+object JaccardSimRank {
+  def jaccardSimRank(s1: String, s2: String, delta: Int = 10000): Int = {
+    0
+  }
+  def apply(s1: String, s2: String): Double = jaccardSimRank(s1, s2)
+}
+
+case class JaccardSimRank(string: Expression,
+                        target: Expression,
+                        k: Literal) extends Predicate with CodegenFallback {
+  //  require(delta.dataType.isInstanceOf[DoubleType])
+
+  override def children: Seq[Expression] =
+    Seq(string, target, k, Literal("JaccardSimRank"))
+
+  override def nullable: Boolean = false
+
+  override def toString: String = s" **($string) IN JACCARD SIMILARITY ($target) ranking ($k)"
+
+  /** Returns the result of evaluating this expression on a given input Row */
+  override def eval(input: InternalRow): Any = {
+    val eval_string = string.eval(input).toString
+    val eval_target = target.eval(input).toString
+    val eval_delta = k.value.asInstanceOf[java.lang.Integer]
+
+    true
+  }
+}
+
+object EditSimRank {
+  def editSimRank(s1: String, s2: String, delta: Int = 10000): Int = {
+    0
+  }
+  def apply(s1: String, s2: String): Double = editSimRank(s1, s2)
+}
+
+case class EditSimRank(string: Expression,
+                          target: Expression,
+                          k: Literal) extends Predicate with CodegenFallback {
+  //  require(delta.dataType.isInstanceOf[DoubleType])
+
+  override def children: Seq[Expression] =
+    Seq(string, target, k, Literal("EditSimRank"))
+
+  override def nullable: Boolean = false
+
+  override def toString: String = s" **($string) IN EDIT SIMILARITY ($target) ranking ($k)"
+
+  /** Returns the result of evaluating this expression on a given input Row */
+  override def eval(input: InternalRow): Any = {
+    val eval_string = string.eval(input).toString
+    val eval_target = target.eval(input).toString
+    val eval_delta = k.value.asInstanceOf[java.lang.Integer]
+
+    true
+  }
+}
+
 case class Intersects(left: Expression, right: Expression)
     extends BinaryExpression with Predicate with CodegenFallback {
   override def toString: String = s"**($left) INTERSECTS ($right)"

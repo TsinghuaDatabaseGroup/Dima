@@ -195,7 +195,9 @@ object ExtractSimilarityJoinKeys extends Logging with PredicateHelper {
             measure = children(3).asInstanceOf[Literal].toString
             children(2).asInstanceOf[Literal]
           } else {
-            Literal(0.8)
+            logError("Condition Can Not Be Empty!")
+            Literal(1.0)
+            return None
           }
         }
         Some((measure, left_keys, right_keys, r, SimilarityJoin, left, right))

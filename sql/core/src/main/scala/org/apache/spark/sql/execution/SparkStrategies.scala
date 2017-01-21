@@ -28,6 +28,7 @@ import org.apache.spark.sql.execution.columnar.{InMemoryColumnarTableScan, InMem
 import org.apache.spark.sql.execution.datasources.{CreateTableUsing, CreateTempTableUsing, DescribeCommand => LogicalDescribeCommand, _}
 import org.apache.spark.sql.execution.joins._
 import org.apache.spark.sql.execution.{DescribeCommand => RunnableDescribeCommand}
+import org.apache.spark.sql.simjointopk.{EditSimJoinTopK, JaccardSimJoinTopK}
 import org.apache.spark.sql.index.{IndexedRelation, IndexedRelationScan, RTreeType, TreeMapType, JaccardIndexType, EdIndexType}
 import org.apache.spark.sql.{IndexInfo, Strategy, execution}
 
@@ -91,13 +92,23 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
               r,
               planLater(left),
               planLater(right)) :: Nil
-          case _ =>
-            logInfo(s"default")
-            JaccardSimilarityJoin(leftKeys,
+          case "JaccardSimRank" =>
+            logInfo(s"JaccardSimJoinTopk")
+            JaccardSimJoinTopK (leftKeys,
               rightKeys,
               r,
               planLater(left),
               planLater(right)) :: Nil
+          case "EditSimRank" =>
+            logInfo(s"EditSimJoinTopk")
+            EditSimJoinTopK (leftKeys,
+              rightKeys,
+              r,
+              planLater(left),
+              planLater(right)) :: Nil
+          case _ =>
+            logError(s"No Such Measurment!")
+            Nil
         }
       case _ => Nil
     }

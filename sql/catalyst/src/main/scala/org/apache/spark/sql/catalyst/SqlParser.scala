@@ -19,6 +19,7 @@ package org.apache.spark.sql.catalyst
 
 import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.analysis._
+import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.{JaccardSimilarity, _}
 import org.apache.spark.sql.catalyst.expressions.aggregate._
 import org.apache.spark.sql.catalyst.plans._
@@ -127,6 +128,8 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
   protected val SIMILARITY = Keyword("SIMILARITY")
   protected val SELFSIMILARITY = Keyword("SELFSIMILARITY")
   protected val JACCARD = Keyword("JACCARD")
+  protected val JACCARDSIMRANK = Keyword("JACCARDSIMRANK")
+  protected val EDSIMRANK = Keyword("EDSIMRANK")
 
   protected lazy val start: Parser[LogicalPlan] =
     start1 | insert | cte
@@ -213,6 +216,12 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
       | ON ~> (EDSIMILARITY ~ "(" ~> termExpression)
       ~ ("," ~> termExpression <~ ")") ~ ("<=" ~> literal) ^^
       { case string ~ target ~ delta => EdSimilarity(string, target, delta) }
+      | ON ~> (JACCARDSIMRANK ~ "(" ~> termExpression)
+      ~ ("," ~> termExpression <~ ")") ~ ("<=" ~> literal) ^^
+      { case string ~ target ~ k => JaccardSimRank(string, target, k) }
+      | ON ~> (EDSIMRANK ~ "(" ~> termExpression)
+      ~ ("," ~> termExpression <~ ")") ~ ("<=" ~> literal) ^^
+      { case string ~ target ~ k => EditSimRank(string, target, k) }
       )
 
   protected lazy val joinType: Parser[JoinType] =
