@@ -312,6 +312,15 @@ private[sql] case class JaccardIndexIndexedRelation(
     Math.floor ( (1 - threshold) * l / threshold + 0.0001).toInt + 1
   }
 
+  private[sql] def segNum(s: String, n: Int): Int = {
+    val hash = s.hashCode % n
+    if (hash >= 0) {
+      hash + 1
+    } else {
+      hash + n + 1
+    }
+  }
+
   private[sql] def createInverse(ss1: String,
                                  group: Array[(Int, Int)],
                                  threshold: Double
@@ -325,7 +334,7 @@ private[sql] case class JaccardIndexIndexedRelation(
       val H = CalculateH1(sl, threshold)
       logInfo(s"createInverse: H: " + H.toString)
       for (i <- 1 until H + 1) yield {
-        val s = ss.filter(x => {x.hashCode % H + 1 == i})
+        val s = ss.filter(x => {segNum(x, H) == i})
         if (s.length == 0) {
           Tuple3("", i, sl)
         } else if (s.length == 1) {

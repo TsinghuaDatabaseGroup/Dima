@@ -255,6 +255,15 @@ object JaccardSimSegmentation {
   }
 
 
+  private[sql] def segNum(s: String, n: Int): Int = {
+    val hash = s.hashCode % n
+    if (hash >= 0) {
+      hash + 1
+    } else {
+      hash + n + 1
+    }
+  }
+
   private[sql] def partition_r(
                    ss1: String,
                    indexNum: scala.collection.Map[(Int, Boolean), Long],
@@ -291,7 +300,7 @@ object JaccardSimSegmentation {
 
       val substring = {
         for (i <- 1 until H + 1) yield {
-          val p = ss.filter(x => x.hashCode % H + 1 == i)
+          val p = ss.filter(x => segNum(x, H) == i)
           if (p.length == 0) "" else if (p.length == 1) p(0) else p.reduce(_ + " " + _)
         }
       }.toArray
@@ -309,7 +318,7 @@ object JaccardSimSegmentation {
       )
 
       for (i <- 1 until H + 1) {
-        val p = ss.filter(x => x.hashCode % H + 1 == i)
+        val p = ss.filter(x => segNum(x, H) == i)
         records += Tuple2(p.map(x => x.hashCode), {
           if (V(i - 1) == 0) Array()
           else if (V(i - 1) == 1) Array(false)

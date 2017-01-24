@@ -418,7 +418,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
 
       val substring = {
         for (i <- 1 until H + 1) yield {
-          val p = ss.filter(x => x.hashCode % H + 1 == i)
+          val p = ss.filter(x => segNum(x, H) == i)
           if (p.length == 0) "" else if (p.length == 1) p(0) else p.reduce(_ + " " + _)
         }
       }.toArray
@@ -435,7 +435,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
         topDegree)
 
       for (i <- 1 until H + 1) {
-        val p = ss.filter(x => x.hashCode % H + 1 == i)
+        val p = ss.filter(x => segNum(x, H) == i)
         records += Tuple2(p.map(x => x.hashCode), {
           if (V(i - 1) == 0) Array()
           else if (V(i - 1) == 1) Array(false)
@@ -468,6 +468,15 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     result.toArray
   }
 
+  private[sql] def segNum(s: String, n: Int): Int = {
+    val hash = s.hashCode % n
+    if (hash >= 0) {
+      hash + 1
+    } else {
+      hash + n + 1
+    }
+  }
+
   private[sql] def createInverse(ss1: String,
                             group: Broadcast[Array[(Int, Int)]],
                             threshold: Double
@@ -481,7 +490,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       val H = CalculateH1(sl, threshold)
       for (i <- 1 until H + 1) yield {
         val s = ss.filter(x => {
-          x.hashCode % H + 1 == i
+          segNum(x, H) == i
         })
         if (s.length == 0) {
           Tuple3("", i, sl)
@@ -501,9 +510,9 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     } else {
       val pivot = xs(xs.length / 2)
       Array.concat(
-        sort(xs filter (pivot >)),
-        xs filter (pivot ==),
-        sort(xs filter (pivot <))
+        sort(xs filter (pivot.hashCode > _.hashCode)),
+        xs filter (pivot.hashCode == _.hashCode),
+        sort(xs filter (pivot.hashCode < _.hashCode))
       )
     }
   }
@@ -519,16 +528,9 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
   private[sql] def verify(x: Array[(Array[Int], Array[Boolean])],
                      y: Array[(Array[Int], Array[Boolean])],
                      threshold: Double,
-                     pos: Int
+                     pos: Int, xLength: Int, yLength: Int
                     ): Boolean = {
-    var xLength = 0
-    for (i <- x) {
-      xLength += i._1.length
-    }
-    var yLength = 0
-    for (i <- y) {
-      yLength += i._1.length
-    }
+    logInfo("enter verification")
     val overlap = calculateOverlapBound(threshold.asInstanceOf[Float], xLength, yLength)
     var currentOverlap = 0
     var currentXLength = 0
@@ -572,17 +574,20 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       }
       if (i + 1 < pos) {
         if (diff < Vx || diff < Vy) {
+          logInfo(s"i:$i, overlap")
           return false
         }
       }
       if (currentOverlap + Math.min((xLength - currentXLength),
         (yLength - currentYLength)) < overlap) {
+        logInfo(s"i:$i, currentOverlap:$currentOverlap, xLength: $xLength, yLength: $yLength, currentXLength: $currentXLength, currentYLength: $currentYLength, overlap: $overlap, prune")
         return false
       }
     }
     if (currentOverlap >= overlap) {
       return true
     } else {
+      logInfo(s"finalOverlap:$currentOverlap, overlap: $overlap, false")
       return false
     }
   }
@@ -591,26 +596,21 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     query: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])])
       , Boolean, Array[Boolean], Boolean, Int),
     index: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])]), Boolean)): Boolean = {
-    logInfo(s"compare " + query._1._1 + " and " + index._1._1)
+    logInfo(s"compare { ${query._1._2.getUTF8String(0).toString} } and { ${index._1._2.getUTF8String(0).toString}}")
+    logInfo(s"isDeletionIndex: ${index._2}, isDeletionQuery: ${query._2}, value: ${if(query._3.length == 0) 0 else if (!query._3(0)) 1 else 2}")
     val pos = query._5
-    if (index._2) {
+    if (index._2) { //
       if (!query._2 && query._3.length > 0 && query._3(0)) {
-          verify(query._1._3, index._1._3, threshold, pos)
+          verify(query._1._3, index._1._3, threshold, pos,
+            query._1._2.getUTF8String(0).toString.split(" ").length,
+            index._1._2.getUTF8String(0).toString.split(" ").length)
       } else {
         false
       }
     } else {
-      if (!query._2 && !query._4 && query._3.length > 0) {
-        verify(query._1._3, index._1._3, threshold, pos)
-      } else if (!query._2 && query._4 && query._3.length > 0) {
-        verify(query._1._3, index._1._3, threshold, pos)
-      } else if (query._2 && !query._4 && query._3.length > 0 && query._3(0)) {
-        verify(query._1._3, index._1._3, threshold, pos)
-      } else if (query._2 && query._4 && query._3.length > 0 && query._3(0)) {
-        verify(query._1._3, index._1._3, threshold, pos)
-      } else {
-        false
-      }
+      verify(query._1._3, index._1._3, threshold, pos,
+        query._1._2.getUTF8String(0).toString.split(" ").length,
+        index._1._2.getUTF8String(0).toString.split(" ").length)
     }
   }
 
