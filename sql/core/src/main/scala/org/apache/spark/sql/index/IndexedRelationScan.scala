@@ -24,6 +24,7 @@ import org.apache.spark.sql.catalyst.util.NumberConverter
 import org.apache.spark.sql.execution.LeafNode
 import org.apache.spark.sql.spatial._
 import org.apache.spark.sql.SimilarityProbe.{EdSimSegmentation, JaccardSimSegmentation}
+import org.apache.spark.sql.topksearch.{EditTopkIndexRelationScan, EditTopkIndexedRelation, JaccardTopkIndexRelationScan, JaccardTopkIndexedRelation}
 
 import scala.collection.mutable
 
@@ -371,7 +372,6 @@ private[sql] case class IndexedRelationScan(
                   if (sendOut.length == 0) {
                     Array[InternalRow]().iterator
                   } else {
-
                     index.findIndex(packed.data,
                       sendOut,
                       delta.toInt)
@@ -381,6 +381,44 @@ private[sql] case class IndexedRelationScan(
               })
           }.reduce((a, b) => a.union(b)).map(_.copy()).distinct()
         } else edSimilarity.indexRDD.flatMap(_.data.map(x => x.content))
+      case jaccardTopk @ JaccardTopkIndexedRelation(_, _, _, column_keys, _) =>
+        if (predicates.nonEmpty) {
+          predicates.map { predicate =>
+            val exps = splitConjunctivePredicates(predicate)
+            var jaccardTopk1 = Array[(String, Int)]()
+            exps.foreach {
+              case JaccardSimRank(string: Expression, target: Literal, delta: Literal) =>
+                val eval_target = target.value.toString
+                val eval_delta =
+                  delta.value.asInstanceOf[java.lang.Integer].toInt
+                jaccardTopk1 = jaccardTopk1 :+ (eval_target, eval_delta)
+            }
+            assert(jaccardTopk1.length == 1)
+            val target = jaccardTopk1.head._1
+            val delta = jaccardTopk1.head._2
+            JaccardTopkIndexRelationScan
+              .getTopk(this.sparkContext, jaccardTopk.indexRDD, target, delta)
+          }.reduce((a, b) => a.union(b)).map(_.copy()).distinct()
+        } else jaccardTopk.indexRDD(0).flatMap(_.data.map(_._2))
+      case editTopk @ EditTopkIndexedRelation(_, _, _, column_keys, _) =>
+        if (predicates.nonEmpty) {
+          predicates.map { predicate =>
+            val exps = splitConjunctivePredicates(predicate)
+            var editTopk1 = Array[(String, Int)]()
+            exps.foreach {
+              case EditSimRank(string: Expression, target: Literal, delta: Literal) =>
+                val eval_target = target.value.toString
+                val eval_delta =
+                  delta.value.asInstanceOf[java.lang.Integer].toInt
+                editTopk1 = editTopk1 :+ (eval_target, eval_delta)
+            }
+            assert(editTopk1.length == 1)
+            val target = editTopk1.head._1
+            val delta = editTopk1.head._2
+            EditTopkIndexRelationScan
+              .getTopk(this.sparkContext, editTopk.indexRDD, target, delta)
+          }.reduce((a, b) => a.union(b)).map(_.copy()).distinct()
+        } else editTopk.indexRDD(0).flatMap(_.data.map(_._2))
       case other =>
         other.indexedRDD.flatMap(_.data)
     }

@@ -57,7 +57,7 @@ object EdGlobal {
     //    println("heap2:")
     //    heap2.getAll()
     //    .foreach(e => println("<" + e._1._1._1 + ", " + e._1._2._1 + ">" + "," + e._2))
-    while (newIndex.getTotalNum() < K) {
+    while (newIndex.getTotalNum() < K && dis <= 50) {
       //      println(s"search in $sim")
       while (!heap1.isEmptyInRange(dis) && !heap2.isEmptyInRange(dis)) {
         val h1 = heap1.getMaxInRange(dis)

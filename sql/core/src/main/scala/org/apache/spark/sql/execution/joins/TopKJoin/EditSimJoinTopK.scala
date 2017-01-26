@@ -17,11 +17,11 @@
 package org.apache.spark.sql.simjointopk
 
 import org.apache.spark.rdd.RDD
-import org.apache.spark.HashPartitioner
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, BindReferences, Expression, JoinedRow, Literal}
 import org.apache.spark.sql.execution.{BinaryNode, SparkPlan}
 import org.apache.spark.sql.simjointopk.index.EditIndex
+import org.apache.spark.sql.simjointopk.partitioner.HashPartitioner
 import util.{EdGlobal, EdIndex, EdPair}
 import org.apache.spark.storage.StorageLevel
 
@@ -49,10 +49,11 @@ case class EditSimJoinTopK (leftKeys: Expression,
     (Math.ceil((1.0 / segmentNum.toDouble) * l) + 0.0001).toInt
   }
 
-  def segRecord(s: String, pos: Int): (String, Int, Int) = {
-    val l = s.length
-    val p = P(l, pos)
-    (s.slice(p, p + l), pos, l)
+  def segRecord(ss: String, pos: Int): (String, Int, Int) = {
+    val s = ss.length
+    val l = L(s, pos)
+    val p = P(s, pos)
+    (ss.slice(p, p + l), pos, s)
   }
 
   def editDistance(s1: String, s2: String, delta: Int = 10000): Int = {
@@ -80,11 +81,12 @@ case class EditSimJoinTopK (leftKeys: Expression,
     val predictDis = pos - 1
     if (predictDis < dis) {
       for (l <- lo until lu + 1) {
-        val lowerBound = Math.max(P(l, pos) - (pos - 1), P(l, pos) - (l - lu + (U + 1 - pos)))
-        val upperBound = Math.min(P(l, pos) + lu - l + U + 1 - pos, P(l, pos) + pos - 1)
+        val ps = P(l, pos)
+        val lowerBound = Math.max(ps - (pos - 1), ps - (l - lu + (U + 1 - pos)))
+        val upperBound = Math.min(ps + lu - l + U + 1 - pos, ps + pos - 1)
         val length = L(l, pos)
         for (p <- lowerBound until upperBound + 1) {
-          result += Tuple2((x._1.slice(p - 1, p - 1 + length), pos, l), x)
+          result += Tuple2((x._1.slice(p, p + length), pos, l), x)
         }
       }
     }
@@ -110,18 +112,20 @@ case class EditSimJoinTopK (leftKeys: Expression,
       (key, row.copy())
     })
 
+    val right_rdd = right.execute().map(row =>
+    {
+      val key = BindReferences
+        .bindReference(rightKeys, right.output)
+        .eval(row)
+        .asInstanceOf[org.apache.spark.unsafe.types.UTF8String]
+        .toString
+      (key, row.copy())
+    })
+
     val first = left_rdd.take(1)(0)
-    var topK = EdIndex(left_rdd.take(K + 1)
-      .filter(x => x._1 != first._1)
+    var topK = EdIndex(right_rdd.take(K + 1)
       .map(x => {
-        val ss = {
-          if (first._1.hashCode < x._1.hashCode) {
-            (first, x)
-          } else {
-            (x, first)
-          }
-        }
-        EdPair(ss._1, ss._2, editDistance(ss._1._1, ss._2._1))
+        EdPair(x, first, editDistance(x._1, first._1))
       }))
 
     //    for (e <- topK.getAll()) {
@@ -133,9 +137,6 @@ case class EditSimJoinTopK (leftKeys: Expression,
     var goon = true
     while (goon) {
       logInfo(s"Iteration round $pos")
-      //      for (e <- topK.getAll()) {
-      //        println("<" + e._1._1._1 + "," + e._1._2._1 + ">" + "," + e._2)
-      //      }
       val probe = left_rdd
         .map(x => createProbeSig(x, maxDis, pos))
         .filter(x => x.length > 0)
@@ -150,7 +151,7 @@ case class EditSimJoinTopK (leftKeys: Expression,
         goon = false
       } else {
         logInfo(s"index building.....")
-        val index = left_rdd
+        val index = right_rdd
           .map(x => (x._1, x._2))
           .map(x => ((x._1, x._2), segRecord(x._1, pos)))
           .map(x => (x._2, x._1))
@@ -171,37 +172,25 @@ case class EditSimJoinTopK (leftKeys: Expression,
             var tempMaxDis = maxDis
             val I = indexIter.next()
             for (p <- probeIter) {
-              //              println("p: "+p._2._1)
               val location = I.index.mapping.getOrElse(p._1, List[Int]())
               for (loc <- location) {
-                //                println(s"loc: $loc")
                 var isDup = false
-//                println("meet "+p._2._1+", "+I.data(loc)._1)
-                if (p._2._1.hashCode >= I.data(loc)._1.hashCode) {
-//                  println("order error")
-                  isDup = true
-                }
-                // indexed minHeap
-                // balance
                 val leftLength = p._2._1.split(" ").length
                 val rightLength = I.data(loc)._1.split(" ").length
                 if (!isDup) {
                   val dis = editDistance(p._2._1, I.data(loc)._1)
-//                  println(s"similarity: $dis, tempMaxDis: $tempMaxDis")
-                  if (dis < tempMaxDis) { // tempMinSim to filter more
+                  if (dis < tempMaxDis ||
+                    (dis == tempMaxDis && heap.getTotalNum() < K)) { // tempMinSim to filter more
                     for (s <- heap.getAllInRange(dis)) {
                       if (p._2._1.hashCode == s.r._1.hashCode &&
                         I.data(loc)._1.hashCode == s.s._1.hashCode) {
-//                        println("duplicated")
                         isDup = true
                       }
                     }
 
                     if (!isDup) {
                       heap.addItem(dis, EdPair(p._2, I.data(loc), dis))
-                      //                    println(s"add complete")
                       tempMaxDis = heap.getMaxDis()
-                      //                    println(s"update minsim to $tempMinSim")
                     }
                   } else {
 //                    println(s"sim lower than lowest one int
@@ -215,18 +204,7 @@ case class EditSimJoinTopK (leftKeys: Expression,
             Array(heap).iterator
           }
           }.distinct
-//        topKSetRdd.flatMap(x => x.getAll())
-        // .map(x => ("<" + x.r._1 + "," + x.s._1 + ">" + "," + x.delta))
-        // .saveAsTextFile("./testMiddleResult/"+pos+"/")
-        //        val topKSet = topKSetRdd.collect()
         index.unpersist()
-
-        //        for (i <- topKSet) {
-        //          for (e <- i.getAll()) {
-        //            println("<" + e._1._1._1 + "," + e._1._2._1 + ">" + "," + e._2)
-        //          }
-        //          println(" ")
-        //        }
         logInfo("merging...")
         topK = topKSetRdd
           .map(x => (1, x))
@@ -234,7 +212,6 @@ case class EditSimJoinTopK (leftKeys: Expression,
           .map(_._2)
           .collect()(0)
           .curveToK(K)
-        //        topK = Global.multiHeapMerge(topKSet, K).curveToK(K)
         maxDis = topK.getMaxDis()
         logInfo("merge complete!")
       }

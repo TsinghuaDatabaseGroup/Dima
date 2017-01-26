@@ -217,10 +217,10 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
       ~ ("," ~> termExpression <~ ")") ~ ("<=" ~> literal) ^^
       { case string ~ target ~ delta => EdSimilarity(string, target, delta) }
       | ON ~> (JACCARDSIMRANK ~ "(" ~> termExpression)
-      ~ ("," ~> termExpression <~ ")") ~ ("<=" ~> literal) ^^
+      ~ ("," ~> termExpression <~ ")") ~ ("=" ~> literal) ^^
       { case string ~ target ~ k => JaccardSimRank(string, target, k) }
       | ON ~> (EDSIMRANK ~ "(" ~> termExpression)
-      ~ ("," ~> termExpression <~ ")") ~ ("<=" ~> literal) ^^
+      ~ ("," ~> termExpression <~ ")") ~ ("=" ~> literal) ^^
       { case string ~ target ~ k => EditSimRank(string, target, k) }
       )
 
@@ -282,6 +282,12 @@ object SqlParser extends AbstractSparkSQLParser with DataTypeParser {
     | (EDSIMILARITY ~ "(" ~> termExpression)
       ~ ("," ~> termExpression <~ ")") ~ ("<=" ~> literal) ^^
       { case string ~ target ~ delta => EdSimilarity(string, target, delta) }
+    | (JACCARDSIMRANK ~ "(" ~> termExpression)
+      ~ ("," ~> termExpression <~ ")") ~ ("=" ~> literal) ^^
+      { case string ~ target ~ delta => JaccardSimRank(string, target, delta) }
+    | (EDSIMRANK ~ "(" ~> termExpression)
+      ~ ("," ~> termExpression <~ ")") ~ ("=" ~> literal) ^^
+      { case string ~ target ~ delta => EditSimRank(string, target, delta) }
     | termExpression ~ ("="  ~> termExpression) ^^ { case e1 ~ e2 => EqualTo(e1, e2) }
     | termExpression ~ ("<"  ~> termExpression) ^^ { case e1 ~ e2 => LessThan(e1, e2) }
     | termExpression ~ ("<=" ~> termExpression) ^^ { case e1 ~ e2 => LessThanOrEqual(e1, e2) }

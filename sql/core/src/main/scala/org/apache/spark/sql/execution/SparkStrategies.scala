@@ -29,7 +29,7 @@ import org.apache.spark.sql.execution.datasources.{CreateTableUsing, CreateTempT
 import org.apache.spark.sql.execution.joins._
 import org.apache.spark.sql.execution.{DescribeCommand => RunnableDescribeCommand}
 import org.apache.spark.sql.simjointopk.{EditSimJoinTopK, JaccardSimJoinTopK}
-import org.apache.spark.sql.index.{IndexedRelation, IndexedRelationScan, RTreeType, TreeMapType, JaccardIndexType, EdIndexType}
+import org.apache.spark.sql.index._
 import org.apache.spark.sql.{IndexInfo, Strategy, execution}
 
 private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
@@ -400,6 +400,14 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           if (attributes.length == 1 && item.attributes.head == attributes.head) {
             result = item
           }
+        } else if (item.indexType == EdTopkType) {
+          if (attributes.length == 1 && item.attributes.head == attributes.head) {
+            result = item
+          }
+        } else if (item.indexType == JaccardTopkType) {
+          if (attributes.length == 1 && item.attributes.head == attributes.head) {
+            result = item
+          }
         }
       })
       result
@@ -427,6 +435,10 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         case JaccardSimilarity(string: NamedExpression, target: Expression, delta: Literal) =>
           lookupIndexInfo(Seq(string.toAttribute))
         case EdSimilarity(string: NamedExpression, target: Expression, delta: Literal) =>
+          lookupIndexInfo(Seq(string.toAttribute))
+        case JaccardSimRank(string: NamedExpression, target: Expression, delta: Literal) =>
+          lookupIndexInfo(Seq(string.toAttribute))
+        case EditSimRank(string: NamedExpression, target: Expression, delta: Literal) =>
           lookupIndexInfo(Seq(string.toAttribute))
         case _ =>
           null

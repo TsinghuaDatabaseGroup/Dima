@@ -155,17 +155,9 @@ case class JaccardSimJoinTopK (leftKeys: Expression,
     })
 
     val first = left_rdd.take(1)(0)
-    var topK = Index(left_rdd.take(K + 1)
-      .filter(x => x._1 != first._1)
+    var topK = Index(right_rdd.take(K + 1)
       .map(x => {
-        val ss = {
-          if (first._1.hashCode < x._1.hashCode) {
-            (first, x)
-          } else {
-            (x, first)
-          }
-        }
-        JaccardPair(ss._1, ss._2, jaccardDistance(ss._1._1, ss._2._1))
+        JaccardPair(x, first, jaccardDistance(x._1, first._1))
       }))
 
     //    for (e <- topK.getAll()) {
@@ -231,7 +223,7 @@ case class JaccardSimJoinTopK (leftKeys: Expression,
                   val bucketSim = f"$sim%1.2f".toDouble
 
 //                  println(s"similarity: $sim, tempMinSim: $tempMinSim")
-                  if (sim > tempMinSim) {
+                  if (sim > tempMinSim || (sim == tempMinSim && heap.getTotalNum() < K)) {
                     // tempMinSim to filter more
 //                    println(bucketSim)
                     for (s <- heap.getAllInRange(bucketSim)) {

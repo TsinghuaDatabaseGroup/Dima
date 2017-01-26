@@ -29,10 +29,11 @@ import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Statistics}
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.index._
 import org.apache.spark.sql.partitioner.SimilarityHashPartitioner
+import org.apache.spark.sql.topksearch.{EditTopkIndexedRelation, JaccardTopkIndexedRelation}
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.storage.StorageLevel._
 
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 
 /**
   * Created by dong on 1/20/16.
@@ -127,6 +128,20 @@ private[sql] class IndexManager extends Logging {
       EdRelation.indexRDD.saveAsObjectFile(fileName + "/rdd")
       sqlContext.sparkContext.parallelize(Array(EdRelation.indexGlobalInfo))
         .saveAsObjectFile(fileName + "/info")
+    } else if (preData.indexType == JaccardTopkType) {
+      val JaccardRelation = indexedItem.indexedData.asInstanceOf[JaccardTopkIndexedRelation]
+      sqlContext.sparkContext.parallelize(Array(JaccardRelation))
+        .saveAsObjectFile(fileName + "/jaccardTopkRelation")
+      var count = 0
+      JaccardRelation.indexRDD
+        .foreach(x => {x.saveAsObjectFile(s"$fileName/rdd/$count"); count += 1})
+    } else if (preData.indexType == EdTopkType) {
+      val EdRelation = indexedItem.indexedData.asInstanceOf[EditTopkIndexedRelation]
+      sqlContext.sparkContext.parallelize(Array(EdRelation))
+        .saveAsObjectFile(fileName + "/edTopkRelation")
+      var count = 0
+      EdRelation.indexRDD
+        .foreach(x => {x.saveAsObjectFile(s"$fileName/rdd/$count"); count += 1})
     } else {
       val treeMapRelation = indexedItem.indexedData.asInstanceOf[TreeMapIndexedRelation]
       sqlContext.sparkContext.parallelize(Array(treeMapRelation))
@@ -168,6 +183,30 @@ private[sql] class IndexManager extends Logging {
         EdIndexIndexedRelation(edRelation.output, edRelation.child,
           edRelation.table_name, edRelation.column_keys,
           edRelation.index_name)(null, rdd, edRelation.indexGlobalInfo))
+    } else if (info.indexType == JaccardTopkType) {
+      val in = ListBuffer[RDD[org.apache.spark.sql.simjointopk.IPartition]]()
+      for (i <- 0 until 20) {
+        in += sqlContext.sparkContext
+          .objectFile[org.apache.spark.sql.simjointopk.IPartition](fileName + s"/rdd/$i")
+      }
+      val jaccardRelation = sqlContext.sparkContext
+        .objectFile[JaccardTopkIndexedRelation](fileName + "/jaccardTopkRelation").collect().head
+      indexedData += IndexedData(indexName, plan,
+        JaccardTopkIndexedRelation(jaccardRelation.output, jaccardRelation.child,
+          jaccardRelation.table_name, jaccardRelation.column_keys,
+          jaccardRelation.index_name)(null, in))
+    } else if (info.indexType == EdTopkType) {
+      val in = ListBuffer[RDD[org.apache.spark.sql.simjointopk.EPartition]]()
+      for (i <- 0 until 20) {
+        in += sqlContext.sparkContext
+          .objectFile[org.apache.spark.sql.simjointopk.EPartition](fileName + s"/rdd/$i")
+      }
+      val edRelation = sqlContext.sparkContext
+        .objectFile[EditTopkIndexedRelation](fileName + "/edTopkRelation").collect().head
+      indexedData += IndexedData(indexName, plan,
+        EditTopkIndexedRelation(edRelation.output, edRelation.child,
+          edRelation.table_name, edRelation.column_keys,
+          edRelation.index_name)(null, in))
     } else {
       val rdd = sqlContext.sparkContext.objectFile[PackedPartitionWithIndex](fileName + "/rdd")
       val treeMapRelation = sqlContext.sparkContext
@@ -249,6 +288,10 @@ private[sql] class IndexManager extends Logging {
           .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist(blocking)
         case EdIndexType => indexedData(dataIndex).indexedData
           .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist(blocking)
+        case EdTopkType => indexedData(dataIndex).indexedData
+          .asInstanceOf[EditTopkIndexedRelation].indexRDD.foreach(_.unpersist(blocking))
+        case JaccardTopkType => indexedData(dataIndex).indexedData
+          .asInstanceOf[JaccardTopkIndexedRelation].indexRDD.foreach(_.unpersist(blocking))
         case _ => indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
       }
       indexedData.remove(dataIndex)
@@ -270,6 +313,10 @@ private[sql] class IndexManager extends Logging {
         .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist(blocking)
       case EdIndexType => indexedData(dataIndex).indexedData
         .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist(blocking)
+      case EdTopkType => indexedData(dataIndex).indexedData
+        .asInstanceOf[EditTopkIndexedRelation].indexRDD.foreach(_.unpersist(blocking))
+      case JaccardTopkType => indexedData(dataIndex).indexedData
+        .asInstanceOf[JaccardTopkIndexedRelation].indexRDD.foreach(_.unpersist(blocking))
       case _ => indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
     }
     indexedData.remove(dataIndex)
@@ -294,6 +341,10 @@ private[sql] class IndexManager extends Logging {
         .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist(blocking)
       case EdIndexType => indexedData(dataIndex).indexedData
         .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist(blocking)
+      case EdTopkType => indexedData(dataIndex).indexedData
+        .asInstanceOf[EditTopkIndexedRelation].indexRDD.foreach(_.unpersist(blocking))
+      case JaccardTopkType => indexedData(dataIndex).indexedData
+        .asInstanceOf[JaccardTopkIndexedRelation].indexRDD.foreach(_.unpersist(blocking))
       case _ => indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
     }
     indexedData.remove(dataIndex)
@@ -315,6 +366,10 @@ private[sql] class IndexManager extends Logging {
             .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist(blocking)
           case EdIndexType => indexedData(dataIndex).indexedData
             .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist(blocking)
+          case EdTopkType => indexedData(dataIndex).indexedData
+            .asInstanceOf[EditTopkIndexedRelation].indexRDD.foreach(_.unpersist(blocking))
+          case JaccardTopkType => indexedData(dataIndex).indexedData
+            .asInstanceOf[JaccardTopkIndexedRelation].indexRDD.foreach(_.unpersist(blocking))
           case _ => indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
         }
         indexedData.remove(dataIndex)
@@ -336,6 +391,10 @@ private[sql] class IndexManager extends Logging {
           .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist(blocking)
         case EdIndexType => indexedData(dataIndex).indexedData
           .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist(blocking)
+        case EdTopkType => indexedData(dataIndex).indexedData
+          .asInstanceOf[EditTopkIndexedRelation].indexRDD.foreach(_.unpersist(blocking))
+        case JaccardTopkType => indexedData(dataIndex).indexedData
+          .asInstanceOf[JaccardTopkIndexedRelation].indexRDD.foreach(_.unpersist(blocking))
         case _ => indexedData(dataIndex).indexedData.indexedRDD.unpersist(blocking)
       }
       indexedData.remove(dataIndex)
@@ -352,6 +411,10 @@ private[sql] class IndexManager extends Logging {
           .asInstanceOf[JaccardIndexIndexedRelation].indexRDD.unpersist()
         case EdIndexType => indexedData(i).indexedData
           .asInstanceOf[EdIndexIndexedRelation].indexRDD.unpersist()
+        case EdTopkType => indexedData(i).indexedData
+          .asInstanceOf[EditTopkIndexedRelation].indexRDD.foreach(_.unpersist())
+        case JaccardTopkType => indexedData(i).indexedData
+          .asInstanceOf[JaccardTopkIndexedRelation].indexRDD.foreach(_.unpersist())
         case _ => indexedData(i).indexedData.indexedRDD.unpersist()
       }
     }

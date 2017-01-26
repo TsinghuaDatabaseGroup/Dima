@@ -29,6 +29,7 @@ import org.apache.spark.sql.spatial.Point
 import org.apache.spark.sql.types.{DoubleType, IntegerType}
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.sql.execution.SimilarityRDD
+import org.apache.spark.sql.topksearch.{EditTopkIndexedRelation, JaccardTopkIndexedRelation}
 
 import scala.collection.mutable.{ArrayBuffer, Map}
 
@@ -55,6 +56,10 @@ private[sql] object IndexedRelation {
         new JaccardIndexIndexedRelation(child.output, child, table_name, column_keys, index_name)()
       case EdIndexType =>
         new EdIndexIndexedRelation(child.output, child, table_name, column_keys, index_name)()
+      case JaccardTopkType =>
+        new JaccardTopkIndexedRelation(child.output, child, table_name, column_keys, index_name)()
+      case EdTopkType =>
+        new EditTopkIndexedRelation(child.output, child, table_name, column_keys, index_name)()
       case _ => null
     }
   }

@@ -31,15 +31,21 @@ class Index extends Serializable{
   var totalNum = 0
 
   def minSimDoublePlus(sim: Double): Double = {
-    assert(sim < 1.0)
-    val r = sim + 0.01
-    f"$r%1.2f".toDouble
+    if (sim < 1.0) {
+      val r = sim + 0.01
+      f"$r%1.2f".toDouble
+    } else {
+      1.0
+    }
   }
 
   def minSimDoubleMinus(sim: Double): Double = {
-    assert(sim > 0.0)
-    val r = sim - 0.01
-    f"$r%1.2f".toDouble
+    if (sim > 0.0) {
+      val r = sim - 0.01
+      f"$r%1.2f".toDouble
+    } else {
+      0.0
+    }
   }
 
   def startUpAddItem(similarity: Double, key: JaccardPair): Unit = {
