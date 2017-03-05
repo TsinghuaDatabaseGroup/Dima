@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Apache Spark
 
 Spark is a fast and general cluster computing system for Big Data. It provides
@@ -94,7 +93,6 @@ building for particular Hive and Hive Thriftserver distributions.
 
 Please refer to the [Configuration Guide](http://spark.apache.org/docs/latest/configuration.html)
 in the online documentation for an overview on how to configure Spark.
-=======
+
 # SimilarityOnSpark
 simialrity join or search on spark core directly
->>>>>>> 9bee4e488f8e7225f89c94531539cf76cc78b04e
