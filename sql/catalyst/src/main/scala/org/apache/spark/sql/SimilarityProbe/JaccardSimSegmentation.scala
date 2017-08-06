@@ -106,8 +106,8 @@ object JaccardSimSegmentation {
     }
   }
 
-  private def minHeapify(A: Array[(Int, Long, Int)], i: Int):
-  Array[(Int, Long, Int)] = {
+  private def minHeapify(A: Array[(Int, Long, Int)], i: Int)
+    : Array[(Int, Long, Int)] = {
     val l = left_child(i)
     val r = right_child(i)
     val AA = A.clone()
@@ -138,11 +138,13 @@ object JaccardSimSegmentation {
   }
 
   private def heapExtractMin(
-                              A: Array[(Int, Long, Int)]
-                            ): Tuple2[Tuple3[Int, Long, Int], Array[(Int, Long, Int)]] = {
+    A: Array[(Int, Long, Int)]
+    ): ((Int, Long, Int), Array[(Int, Long, Int)]) = {
     val heapSize = A.length
     if (heapSize < 1) {
+      // scalastyle:off println
       println(s"heap underflow")
+      // scalastyle:on println
     }
     val AA = A.clone()
     val min = AA(0)
@@ -153,10 +155,12 @@ object JaccardSimSegmentation {
   private def heapIncreaseKey(
                                A: Array[(Int, Long, Int)],
                                i: Int,
-                               key: Tuple3[Int, Long, Int]
+                               key: (Int, Long, Int)
                              ): Array[(Int, Long, Int)] = {
     if (compare(key._2, A(i - 1)._2) > 0) {
+      // scalastyle:off println
       println(s"new key is larger than current Key")
+      // scalastyle:on println
     }
     val AA = A.clone()
     AA(i - 1) = key
@@ -279,10 +283,11 @@ object JaccardSimSegmentation {
       Array[(Int, Boolean, Array[Boolean],
         Boolean,
         Int)])]()
-    var ss = ss1.split(" ")
+    val ss = ss1.split(" ").filter(x => x.length > 0)
     val s = ss.size
     val range = group
-      .filter(x => !(x._1 > Math.floor(s / threshold).toInt || x._2 < (Math.ceil(threshold * s) + 0.0001).toInt))
+      .filter(x => !(x._1 > Math.floor(s / threshold).toInt
+        || x._2 < (Math.ceil(threshold * s) + 0.0001).toInt))
     for (lrange <- range) {
       val l = lrange._1
       val isExtend = {
@@ -331,16 +336,13 @@ object JaccardSimSegmentation {
         val hash = (substring(i - 1), i, l).hashCode()
         val sub = substring(i-1)
         if (V(i-1) == 1) {
-          println(s"value = 1 inverse and substring: $sub, i: $i, l: $l")
           result1 += Tuple5(hash, false, Array(false), isExtend, i)
         }
         else if (V(i-1) == 2) {
           result1 += Tuple5(hash, false, Array(true), isExtend, i)
-          println(s"value = 2 inverse and substring: $sub, i: $i, l: $l")
           if (substring(i - 1).length > 0) {
             for (k <- createDeletion(substring(i - 1))) {
               val hash1 = (k, i, l).hashCode()
-              println(s"value = 2 deletion and substring: $k, i: $i, l: $l")
               result1 += Tuple5(hash1, true, Array(true), isExtend, i)
             }
           }
@@ -361,7 +363,7 @@ object JaccardSimSegmentation {
                     threshold: Double
                    ): Array[(String, Int, Int)] = {
     {
-      val ss = ss1.split(" ")
+      val ss = ss1.split(" ").filter(x => x.length > 0)
       val range = group.filter(
         x => (x._1 <= ss.length && x._2 >= ss.length)
       )

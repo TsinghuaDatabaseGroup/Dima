@@ -331,7 +331,7 @@ private[sql] case class JaccardIndexIndexedRelation(
                                  threshold: Double
                                 ): Array[(String, Int, Int)] = {
     {
-      val ss = ss1.split(" ")
+      val ss = ss1.split(" ").filter(x => x.length > 0)
       val range = group.filter(
         x => (x._1 <= ss.length && x._2 >= ss.length)
       )
@@ -421,14 +421,12 @@ private[sql] case class JaccardIndexIndexedRelation(
       .map(x => (x._1, createDeletion(x._2))) // (1,i,l), deletionSubstring
       .flatMapValues(x => x)
       .map(x => {
-//        println(s"deletion index: " + x._2 + " " + x._1._2 + " " + x._1._3)
         ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, true))
       })
     // (hashCode, (String, internalrow))
 
     val segIndexSig = splittedRecord
       .map(x => {
-//        println(s"inverse index: " + x._2 + " " + x._1._2 + " " + x._1._3)
         ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, false))
       })
 
@@ -459,7 +457,13 @@ private[sql] case class JaccardIndexIndexedRelation(
           createInverse(sortByValue(x._2._1._1),
             multiGroup.value,
             threshold)
-        .map(x => (x._1.split(" ").map(s => s.hashCode), Array[Boolean]()))), x._2._2)))).iterator
+        .map(x => {
+          if (x._1.length > 0) {
+            (x._1.split(" ").map(s => s.hashCode), Array[Boolean]())
+          } else {
+            (Array[Int](), Array[Boolean]())
+          }
+        })), x._2._2)))).iterator
     }).persist(StorageLevel.MEMORY_AND_DISK_SER)
     indexed.count
 
@@ -570,44 +574,29 @@ private[sql] case class EdIndexIndexedRelation(
     result
   }
 
-  private def part(content: InternalRow, s: String, threshold: Int): Array[(Int, ValueInfo)] = {
+  private def part(content: InternalRow, s: String, threshold: Int,
+    L: Broadcast[Map[(Int, Int), Int]],
+    P: Broadcast[Map[(Int, Int), Int]]): Array[(Int, ValueInfo)] = {
     var ss = ArrayBuffer[(Int, ValueInfo)]()
     val U: Int = threshold
     val l = s.length
     val K: Int = (l - Math.floor(l / (U + 1)) * (U + 1)).toInt
     var point: Int = 0
     for (i <- 1 until U + 2) {
-      if (i <= (U + 1 - K)) {
-        val length = Math.floor(l / (U + 1)).toInt
-        val seg1 = {
-          s.slice(point, point + length)
-        }
-        ss += Tuple2((seg1, i, l, 0).hashCode(),
-          ValueInfo(content, s, false, Array[Boolean]()))
-
-        for (n <- 0 until length) {
-          val subset = s.slice(point, point + n) + s.slice(point + n + 1, point + length)
-          val seg = subset
-          val key = (seg, i, l, n + 1).hashCode()
-          ss += Tuple2(key, ValueInfo(content, s, true, Array[Boolean]()))
-        }
-        point = point + length
-      } else {
-        val length = Math.ceil(l / (U + 1) + 0.001).toInt
-        val seg1 = {
-          val xx = s.slice(point, point + length)
-          xx
-        }
-        ss += Tuple2((seg1, i, l, 0).hashCode(),
-          ValueInfo(content, s, false, Array[Boolean]()))
-        for (n <- 0 until length) {
-          val subset = s.slice(point, point + n) + s.slice(point + n + 1, point + length)
-          val seg = subset
-          val key = (seg, i, l, n + 1).hashCode()
-          ss += Tuple2(key, ValueInfo(content, s, true, Array[Boolean]()))
-        }
-        point = point + length
+      val length = L.value(l, i)
+      val seg1 = {
+        s.slice(point, point + length)
       }
+      ss += Tuple2((seg1, i, l, 0).hashCode(),
+        ValueInfo(content, s, false, Array[Boolean]()))
+
+      for (n <- 0 until length) {
+        val subset = s.slice(point, point + n) + s.slice(point + n + 1, point + length)
+        val seg = subset
+        val key = (seg, i, l, n + 1).hashCode()
+        ss += Tuple2(key, ValueInfo(content, s, true, Array[Boolean]()))
+      }
+      point = point + length
     }
     ss.toArray
   } // (substring, i, rlength)
@@ -638,7 +627,7 @@ private[sql] case class EdIndexIndexedRelation(
     val index_rdd = rdd
       .map(x => (x._1.length, x._1, x._2))
       .filter(x => x._1 > threshold)
-      .flatMap(x => part(x._3, x._2, threshold))
+      .flatMap(x => part(x._3, x._2, threshold, partitionL, partitionP))
       .map(x => (x._1, x._2))
       .persist(StorageLevel.DISK_ONLY)
 
@@ -648,7 +637,6 @@ private[sql] case class EdIndexIndexedRelation(
       })
         .reduceByKey(_ + _)
         .filter(x => x._2 > abandonNum)
-    //    println(s"frequencyTableLength: $f")
 
     val frequencyTable = child.sparkContext.broadcast(
       f.collectAsMap()

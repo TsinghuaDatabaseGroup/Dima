@@ -293,7 +293,6 @@ private[sql] case class IndexedRelationScan(
             val target = jaccardSimilarity1.head._1
             val delta = jaccardSimilarity1.head._2.toDouble
             val global = jaccardSimilarity.indexGlobalInfo
-//            println(s"globalInfo in IndexedRelationScan is $global")
             val partitionedQuery = JaccardSimSegmentation.partition_r(
               JaccardSimSegmentation.sortByValue(target),
               global.frequencyTable.value,
@@ -348,7 +347,6 @@ private[sql] case class IndexedRelationScan(
             val target = edSimilarity1.head._1
             val delta = edSimilarity1.head._2.toInt
             val global = edSimilarity.indexGlobalInfo
-            //            println(s"globalInfo in IndexedRelationScan is $global")
             val partitionedQuery = EdSimSegmentation.parts(
               target,
               global.frequencyTable.value,

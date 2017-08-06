@@ -139,15 +139,16 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def minHeapInsert(
-                                  A: Array[(Int, (Long, Long), Int)],
-                                  key: (Int, (Long, Long), Int)
-                                ): Array[(Int, (Long, Long), Int)] = {
+    A: Array[(Int, (Long, Long), Int)],
+    key: (Int, (Long, Long), Int)
+    ): Array[(Int, (Long, Long), Int)] = {
     val AA = Array.concat(A, Array(key).map(x => (x._1, (Long.MaxValue, Long.MaxValue), x._3)))
     heapIncreaseKey(AA, AA.length, key)
   }
 
   private[sql] def buildMinHeap(
-                                 A: Array[(Int, (Long, Long), Int)]): Array[(Int, (Long, Long), Int)] = {
+    A: Array[(Int, (Long, Long), Int)])
+  : Array[(Int, (Long, Long), Int)] = {
     var AA = A.clone()
     for (i <- (1 until Math.floor(AA.length / 2).toInt + 1).reverse) {
       AA = minHeapify(AA, i)
@@ -156,16 +157,15 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def calculateVsl(
-                                 U: Int,
-                                 l: Int,
-                                 indexNum: scala.collection.Map[(Int, Boolean), Long],
-                                 record: String,
-                                 threshold: Int,
-                                 numPartition: Int,
-                                 topDegree: Int,
-                                 P: Map[(Int, Int), Int],
-                                 L: Map[(Int, Int), Int]
-                               ): Array[Int] = {
+    U: Int,
+    l: Int,
+    indexNum: scala.collection.Map[(Int, Boolean), Long],
+    record: String,
+    threshold: Int,
+    numPartition: Int,
+    topDegree: Int,
+    P: Map[(Int, Int), Int],
+    L: Map[(Int, Int), Int]): Array[Int] = {
 
     val sLength = record.length
 
@@ -380,47 +380,34 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def part(
-                         content: InternalRow, s: String, threshold: Int): Array[(Int, ValueInfo)] = {
+    content: InternalRow, s: String,
+    threshold: Int,
+    L: Broadcast[Map[(Int, Int), Int]],
+    P: Broadcast[Map[(Int, Int), Int]]): Array[(Int, ValueInfo)] = {
     var ss = ArrayBuffer[(Int, ValueInfo)]()
     val U: Int = threshold
     val l = s.length
-    val K: Int = (l - Math.floor(l / (U + 1)) * (U + 1)).toInt
     var point: Int = 0
     for (i <- 1 until U + 2) {
-      if (i <= (U + 1 - K)) {
-        val length = Math.floor(l / (U + 1)).toInt
-        val seg1 = {
-          s.slice(point, point + length)
-        }
-        ss += Tuple2((seg1, i, l, 0).hashCode(),
-          ValueInfo(content, s, false, Array[Boolean]()))
-        logInfo(s"segIndexSig: " + seg1 + ", " + i + ", " + l)
-        for (n <- 0 until length) {
-          val subset = s.slice(point, point + n) + s.slice(point + n + 1, point + length)
-          val seg = subset
-          val key = (seg, i, l, n + 1).hashCode()
-          logInfo(s"delIndexSig: " + seg + ", " + i + ", " + l + ", " + (n + 1))
-          ss += Tuple2(key, ValueInfo(content, s, true, Array[Boolean]()))
-        }
-        point = point + length
-      } else {
-        val length = Math.ceil(l / (U + 1) + 0.001).toInt
-        val seg1 = {
-          val xx = s.slice(point, point + length)
-          xx
-        }
-        ss += Tuple2((seg1, i, l, 0).hashCode(),
-          ValueInfo(content, s, false, Array[Boolean]()))
-        logInfo(s"segIndexSig: " + seg1 + ", " + i + ", " + l)
-        for (n <- 0 until length) {
-          val subset = s.slice(point, point + n) + s.slice(point + n + 1, point + length)
-          val seg = subset
-          val key = (seg, i, l, n + 1).hashCode()
-          logInfo(s"delIndexSig: " + seg + ", " + i + ", " + l + ", " + (n + 1))
-          ss += Tuple2(key, ValueInfo(content, s, true, Array[Boolean]()))
-        }
-        point = point + length
+      val length = L.value(l, i)
+      val seg1 = {
+        s.slice(point, point + length)
       }
+      ss += Tuple2((seg1, i, l, 0).hashCode(),
+        ValueInfo(content, s, false, Array[Boolean]()))
+      if (s == "cafe bizou") {
+        logInfo(s"segIndexSig: " + seg1 + ", " + i + ", " + l)
+      }
+      for (n <- 0 until length) {
+        val subset = s.slice(point, point + n) + s.slice(point + n + 1, point + length)
+        val seg = subset
+        val key = (seg, i, l, n + 1).hashCode()
+        if (s == "cafe bizou") {
+          logInfo(s"delIndexSig: " + seg + ", " + i + ", " + l + ", " + (n + 1))
+        }
+        ss += Tuple2(key, ValueInfo(content, s, true, Array[Boolean]()))
+      }
+      point = point + length
     }
     ss.toArray
   } // (substring, i, rlength)
@@ -467,6 +454,7 @@ case class EditDistanceSimilarityJoin(
         topDegree,
         P.value,
         L.value)
+
       for (i <- 1 until U + 2) {
         val lowerBound = Math.max(P.value(l, i) - (i - 1),
           P.value(l, i) - (l - sLength + (U + 1 - i)))
@@ -479,13 +467,18 @@ case class EditDistanceSimilarityJoin(
               val subset = s.slice(x - 1, x - 1 + length)
               subset
             }
-            logInfo(s"segProbeSig_1: " + seg + ", " + i + ", " + l)
+            if (s == "cafe bizou") {
+              logInfo(s"segProbeSig_1: " + seg + ", " + i + ", " + l)
+            }
             result += Tuple2((seg, i, l, 0).hashCode(), ValueInfo(content, s, false, Array(false)))
           } else if (V(i - 1) == 2) {
             for (n <- 0 until length) {
               val subset = s.slice(x - 1, x - 1 + n) + s.slice(x - 1 + n + 1, x - 1 + length)
               val seg = subset
-              logInfo(s"delProbeSig_2: (" + seg + ", " + i + ", " + l + ", " + (n + 1) + ")")
+              if (s == "cafe bizou") {
+                logInfo(s"segment: ${s.slice(x - 1, x - 1 + length)}")
+                logInfo(s"delProbeSig_2: (" + seg + ", " + i + ", " + l + ", " + (n + 1) + ")")
+              }
               val key = (seg, i, l, n + 1).hashCode()
               result += Tuple2(key, ValueInfo(content, s, true, Array(true)))
             }
@@ -544,10 +537,12 @@ case class EditDistanceSimilarityJoin(
   }
 
   private[sql] def compareSimilarity(
-                                      query: ValueInfo, index: ValueInfo, threshold: Int): Boolean = {
+    query: ValueInfo, index: ValueInfo, threshold: Int): Boolean = {
     val queryHash = query.record.hashCode
     val indexHash = index.record.hashCode
-    logInfo(s"compare: " + query.record + " and " + index.record)
+    /* logInfo(s"compare: ${query.record} and ${index.record}," +
+      s"query isdeletion: ${query.isDeletion}, index " +
+      s"isdeletion: ${index.isDeletion}, threshold: ${threshold}") */
     if (!(query.isDeletion ^ index.isDeletion)) {
       EDdistance(query.record, index.record) <= threshold
     } else {
@@ -585,18 +580,19 @@ case class EditDistanceSimilarityJoin(
       (key, row.copy())
     })
     val record = left_rdd
-      .distinct
+      // .distinct
       .persist(StorageLevel.DISK_ONLY)
 
     val record2 = right_rdd
-      .distinct
+      // .distinct
       .persist(StorageLevel.DISK_ONLY)
 
     val indexLength = record
       .map(x => x._1.length)
       .persist(StorageLevel.DISK_ONLY)
 
-    val minLength = sparkContext.broadcast(Math.max(indexLength.min, threshold + 1))
+    // val minLength = sparkContext.broadcast(Math.max(indexLength.min, threshold + 1))
+    val minLength = sparkContext.broadcast(indexLength.min)
     val maxLength = sparkContext.broadcast(indexLength.max)
 
     val partitionL = sparkContext
@@ -606,8 +602,8 @@ case class EditDistanceSimilarityJoin(
 
     val index_rdd = record
       .map(x => (x._1.length, x._1, x._2))
-      .filter(x => x._1 > threshold)
-      .flatMap(x => part(x._3, x._2, threshold))
+      // .filter(x => x._1 > threshold)
+      .flatMap(x => part(x._3, x._2, threshold, partitionL, partitionP))
       .map(x => (x._1, x._2))
       .persist(StorageLevel.DISK_ONLY)
 
@@ -617,7 +613,6 @@ case class EditDistanceSimilarityJoin(
       })
         .reduceByKey(_ + _)
         .filter(x => x._2 > abandonNum)
-    //    println(s"frequencyTableLength: $f")
 
     val frequencyTable = sparkContext.broadcast(
       f.collectAsMap()
@@ -648,7 +643,7 @@ case class EditDistanceSimilarityJoin(
     index_indexed_rdd.count
 
     val query_rdd = record2
-      .filter(x => x._1.length > threshold)
+      // .filter(x => x._1.length > threshold)
       .map(x => (x._1.length, x._1, x._2))
       .flatMap(
         x => parts(
@@ -738,6 +733,8 @@ case class EditDistanceSimilarityJoin(
                 extraIndex.value(whichIndex)(0)._2
               }
             }
+
+            // TODO duplicate result shoule be removed
             if (compareSimilarity(q._2, data(i), threshold)) {
               ans += Tuple2(q._2.content, data(i).content)
             }

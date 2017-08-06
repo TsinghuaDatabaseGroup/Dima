@@ -34,7 +34,6 @@ import scala.collection.mutable.ArrayBuffer
   * Created by sunji on 16/9/2.
   */
 
-
 case class JaccardSimilarityJoin(leftKeys: Expression,
                                      rightKeys: Expression,
                                      l: Literal,
@@ -173,7 +172,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
                             ): ((Int, (Long, Long), Int), Array[(Int, (Long, Long), Int)]) = {
     val heapSize = A.length
     if (heapSize < 1) {
-      //      logInfo(s"heap underflow")
+       logInfo(s"heap underflow")
     }
     val AA = A.clone()
     val min = AA(0)
@@ -228,17 +227,17 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
   }
 
   private[sql] def calculateVsl(
-                            s: Int,
-                            l: Int,
-                            indexNum: scala.collection.Map[(Int, Boolean), Long],
-                            partitionTable: scala.collection.Map[Int, Int],
-                            substring: Array[String],
-                            H: Int,
-                            minimum: Int,
-                            alpha: Double,
-                            numPartition: Int,
-                            topDegree: Int
-                          ): Array[Int] = {
+    s: Int,
+    l: Int,
+    indexNum: scala.collection.Map[(Int, Boolean), Long],
+    partitionTable: scala.collection.Map[Int, Int],
+    substring: Array[String],
+    H: Int,
+    minimum: Int,
+    alpha: Double,
+    numPartition: Int,
+    topDegree: Int
+  ): Array[Int] = {
 
     val C0 = {
       for (i <- 1 until H + 1) yield {
@@ -380,22 +379,21 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
 
 
   private[sql] def partition_r(
-                           ss1: String,
-                           indexNum: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
-                           partitionTable: Broadcast[scala.collection.immutable.Map[Int, Int]],
-                           minimum: Int,
-                           group: Broadcast[Array[(Int, Int)]],
-                           threshold: Double,
-                           alpha: Double,
-                           partitionNum: Int,
-                           topDegree: Int
-                         ): Array[(Array[(Array[Int], Array[Boolean])],
+    ss1: String,
+    indexNum: Broadcast[scala.collection.Map[(Int, Boolean), Long]],
+    partitionTable: Broadcast[scala.collection.immutable.Map[Int, Int]],
+    minimum: Int,
+    group: Broadcast[Array[(Int, Int)]],
+    threshold: Double,
+    alpha: Double,
+    partitionNum: Int,
+    topDegree: Int): Array[(Array[(Array[Int], Array[Boolean])],
     Array[(Int, Boolean, Array[Boolean], Boolean, Int)])] = {
     var result = ArrayBuffer[(Array[(Array[Int], Array[Boolean])],
       Array[(Int, Boolean, Array[Boolean],
         Boolean,
         Int)])]()
-    val ss = ss1.split(" ")
+    val ss = ss1.split(" ").filter(x => x.length > 0)
     val s = ss.size
     val range = group.value
       .filter(x => {
@@ -414,6 +412,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
 
       val H = CalculateH1(l, threshold)
 
+      // each segment and its v value of this record
       val records = ArrayBuffer[(Array[Int], Array[Boolean])]()
 
       val substring = {
@@ -442,7 +441,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
           else Array(true)
         })
       }
-
+      // probe seg/del signatures of this probe record
       var result1 = ArrayBuffer[(Int, Boolean, Array[Boolean], Boolean, Int)]()
       for (i <- 1 until H + 1) {
         val hash = (substring(i - 1), i, l).hashCode()
@@ -482,7 +481,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
                             threshold: Double
                            ): Array[(String, Int, Int)] = {
     {
-      val ss = ss1.split(" ")
+      val ss = ss1.split(" ").filter(x => x.length > 0)
       val range = group.value.filter(
         x => (x._1 <= ss.length && x._2 >= ss.length)
       )
@@ -530,7 +529,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
                      threshold: Double,
                      pos: Int, xLength: Int, yLength: Int
                     ): Boolean = {
-    logInfo("enter verification")
+    logInfo(s"enter verification, pos: ${pos}, xLength: ${xLength}, yLength: ${yLength}")
     val overlap = calculateOverlapBound(threshold.asInstanceOf[Float], xLength, yLength)
     var currentOverlap = 0
     var currentXLength = 0
@@ -580,7 +579,9 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       }
       if (currentOverlap + Math.min((xLength - currentXLength),
         (yLength - currentYLength)) < overlap) {
-        logInfo(s"i:$i, currentOverlap:$currentOverlap, xLength: $xLength, yLength: $yLength, currentXLength: $currentXLength, currentYLength: $currentYLength, overlap: $overlap, prune")
+        logInfo(s"i:$i, currentOverlap:$currentOverlap, " +
+          s"xLength: $xLength, yLength: $yLength, currentXLength: $currentXLength, " +
+          s"currentYLength: $currentYLength, overlap: $overlap, prune")
         return false
       }
     }
@@ -596,21 +597,35 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     query: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])])
       , Boolean, Array[Boolean], Boolean, Int),
     index: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])]), Boolean)): Boolean = {
-    logInfo(s"compare { ${query._1._2.getUTF8String(0).toString} } and { ${index._1._2.getUTF8String(0).toString}}")
-    logInfo(s"isDeletionIndex: ${index._2}, isDeletionQuery: ${query._2}, value: ${if(query._3.length == 0) 0 else if (!query._3(0)) 1 else 2}")
+    logInfo(s"compare { ${query._1._2} } and " +
+      s"{ ${index._1._2}}")
+    logInfo(s"isDeletionIndex: ${index._2}, isDeletionQuery: ${query._2}, val" +
+      s"ue: ${
+        if (query._3.length == 0) {
+          0
+        } else if (!query._3(0)) {
+          1
+        } else {
+          2
+        }
+      }")
     val pos = query._5
+    val query_length = query._1._3
+      .map(x => x._1.length)
+      .reduce(_ + _)
+    val index_length = index._1._3
+      .map(x => x._1.length)
+      .reduce(_ + _)
     if (index._2) { //
       if (!query._2 && query._3.length > 0 && query._3(0)) {
           verify(query._1._3, index._1._3, threshold, pos,
-            query._1._2.getUTF8String(0).toString.split(" ").length,
-            index._1._2.getUTF8String(0).toString.split(" ").length)
+            query_length, index_length)
       } else {
         false
       }
     } else {
       verify(query._1._3, index._1._3, threshold, pos,
-        query._1._2.getUTF8String(0).toString.split(" ").length,
-        index._1._2.getUTF8String(0).toString.split(" ").length)
+        query_length, index_length)
     }
   }
 
@@ -669,7 +684,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
 
     val record = left_rdd
       .map(x => (sortByValue(x._1), x._2))
-      .distinct
+      // .distinct
       .persist(StorageLevel.DISK_ONLY)
     val multiGroup = sparkContext
       .broadcast(multigroup(minimum.value, maximum.value, threshold, alpha))
@@ -723,19 +738,25 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
         threshold, frequencyTable, multiGroup, minimum.value, alpha, num_partitions)
       Array(IPartition(partitionId, index,
         data.
-          map(x => (((x._2._1._1.hashCode,
+          map(x => ((x._2._1._1.hashCode,
             x._2._1._2,
             createInverse(x._2._1._1, multiGroup, threshold)
-              .map(x => (x._1.split(" ").map(s => s.hashCode), Array[Boolean]()))),
-            x._2._2))))).iterator
+              .map(x => {
+              if (x._1.length > 0) {
+                (x._1.split(" ").map(s => s.hashCode), Array[Boolean]())
+              } else {
+                (Array[Int](), Array[Boolean]())
+              }
+            })),
+            x._2._2)))).iterator
     }).persist(StorageLevel.MEMORY_AND_DISK_SER)
 
     index_rdd_indexed.count
 
     val query_rdd = right_rdd
       .map(x => (sortByValue(x._1), x._2))
-      .distinct
-      .map(x => ((x._1.hashCode, x._2),
+      // .distinct
+      .map(x => ((x._1.hashCode, x._2, x._1),
         partition_r(
           x._1, frequencyTable, partitionTable, minimum.value, multiGroup,
           threshold, alpha, num_partitions, topDegree
