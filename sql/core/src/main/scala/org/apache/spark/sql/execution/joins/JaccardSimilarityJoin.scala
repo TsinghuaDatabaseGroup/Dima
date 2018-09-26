@@ -172,7 +172,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
                             ): ((Int, (Long, Long), Int), Array[(Int, (Long, Long), Int)]) = {
     val heapSize = A.length
     if (heapSize < 1) {
-       logInfo(s"heap underflow")
+       logDebug(s"heap underflow")
     }
     val AA = A.clone()
     val min = AA(0)
@@ -186,7 +186,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
                                key: (Int, (Long, Long), Int)
                              ): Array[(Int, (Long, Long), Int)] = {
     if (compare(key._2, A(i - 1)._2) > 0) {
-      logInfo(s"new key is larger than current Key")
+      logDebug(s"new key is larger than current Key")
     }
     val AA = A.clone()
     AA(i - 1) = key
@@ -446,15 +446,15 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       for (i <- 1 until H + 1) {
         val hash = (substring(i - 1), i, l).hashCode()
         if (V(i - 1) == 1) {
-          logInfo(s"segProbeSig_1: (" + substring(i - 1) + ", " + i + ", " + l + ")" )
+          logDebug(s"segProbeSig_1: (" + substring(i - 1) + ", " + i + ", " + l + ")" )
           result1 += Tuple5(hash, false, Array(false), isExtend, i)
         }
         else if (V(i - 1) == 2) {
-          logInfo(s"segProbeSig_2: (" + substring(i - 1) + ", " + i + ", " + l + ")" )
+          logDebug(s"segProbeSig_2: (" + substring(i - 1) + ", " + i + ", " + l + ")" )
           result1 += Tuple5(hash, false, Array(true), isExtend, i)
           if (substring(i - 1).length > 0) {
             for (k <- createDeletion(substring(i - 1))) {
-              logInfo(s"segProbeSig_2: (" + k + ", " + i + ", " + l + ")" )
+              logDebug(s"segProbeSig_2: (" + k + ", " + i + ", " + l + ")" )
               val hash1 = (k, i, l).hashCode()
               result1 += Tuple5(hash1, true, Array(true), isExtend, i)
             }
@@ -529,7 +529,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
                      threshold: Double,
                      pos: Int, xLength: Int, yLength: Int
                     ): Boolean = {
-    logInfo(s"enter verification, pos: ${pos}, xLength: ${xLength}, yLength: ${yLength}")
+    logDebug(s"enter verification, pos: ${pos}, xLength: ${xLength}, yLength: ${yLength}")
     val overlap = calculateOverlapBound(threshold.asInstanceOf[Float], xLength, yLength)
     var currentOverlap = 0
     var currentXLength = 0
@@ -573,13 +573,13 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       }
       if (i + 1 < pos) {
         if (diff < Vx || diff < Vy) {
-          logInfo(s"i:$i, overlap")
+          logDebug(s"i:$i, overlap")
           return false
         }
       }
       if (currentOverlap + Math.min((xLength - currentXLength),
         (yLength - currentYLength)) < overlap) {
-        logInfo(s"i:$i, currentOverlap:$currentOverlap, " +
+        logDebug(s"i:$i, currentOverlap:$currentOverlap, " +
           s"xLength: $xLength, yLength: $yLength, currentXLength: $currentXLength, " +
           s"currentYLength: $currentYLength, overlap: $overlap, prune")
         return false
@@ -588,7 +588,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     if (currentOverlap >= overlap) {
       return true
     } else {
-      logInfo(s"finalOverlap:$currentOverlap, overlap: $overlap, false")
+      logDebug(s"finalOverlap:$currentOverlap, overlap: $overlap, false")
       return false
     }
   }
@@ -597,9 +597,9 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     query: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])])
       , Boolean, Array[Boolean], Boolean, Int),
     index: ((Int, InternalRow, Array[(Array[Int], Array[Boolean])]), Boolean)): Boolean = {
-    logInfo(s"compare { ${query._1._2} } and " +
+    logDebug(s"compare { ${query._1._2} } and " +
       s"{ ${index._1._2}}")
-    logInfo(s"isDeletionIndex: ${index._2}, isDeletionQuery: ${query._2}, val" +
+    logDebug(s"isDeletionIndex: ${index._2}, isDeletionQuery: ${query._2}, val" +
       s"ue: ${
         if (query._3.length == 0) {
           0
@@ -644,9 +644,9 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
   }
 
   override protected def doExecute(): RDD[InternalRow] = {
-    logInfo(s"execute JaccardSelfSimilarityJoin")
-    logInfo(s"LEFT: ${left}")
-    logInfo(s"RIGHT: ${right}")
+    logDebug(s"execute JaccardSelfSimilarityJoin")
+    logDebug(s"LEFT: ${left}")
+    logDebug(s"RIGHT: ${right}")
 
     val left_rdd = left.execute().map(row =>
     {
@@ -669,7 +669,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     })
 
     val rdd1 = left_rdd
-      .map(x => (x._1.split(" ").size))
+      .map(x => (x._1.split(" ").filter(_.size > 0).size))
       .persist(StorageLevel.DISK_ONLY)
     val minimum = sparkContext.broadcast(rdd1.min())
     val maximum = sparkContext.broadcast(rdd1.max())
@@ -677,7 +677,7 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
     val average = sparkContext.broadcast(rdd1.sum() / count.value)
     rdd1.unpersist()
 
-    logInfo(s"" + minimum.value.toString + " "
+    logDebug(s"" + minimum.value.toString + " "
       + maximum.value.toString + " "
       + average.value.toString + " "
       + count.value.toString)
@@ -686,6 +686,9 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       .map(x => (sortByValue(x._1), x._2))
       // .distinct
       .persist(StorageLevel.DISK_ONLY)
+
+    logInfo(s"" + minimum.value.toString + "--" + maximum.value.toString)
+
     val multiGroup = sparkContext
       .broadcast(multigroup(minimum.value, maximum.value, threshold, alpha))
 
@@ -701,13 +704,13 @@ case class JaccardSimilarityJoin(leftKeys: Expression,
       .map(x => (x._1, createDeletion(x._2)))
       .flatMapValues(x => x)
       .map(x => {
-        logInfo(s"deletionIndexSig: (" + x._2 + ", " + x._1._2 + ", " + x._1._3 + ")" )
+        logDebug(s"deletionIndexSig: (" + x._2 + ", " + x._1._2 + ", " + x._1._3 + ")" )
         ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, true))
       })
 
     val segIndexSig = splittedRecord
       .map(x => {
-        logInfo(s"segIndexSig: (" + x._2 + ", " + x._1._2 + ", " + x._1._3 + ")" )
+        logDebug(s"segIndexSig: (" + x._2 + ", " + x._1._2 + ", " + x._1._3 + ")" )
         ((x._2, x._1._2, x._1._3).hashCode(), (x._1._1, false))
       })
 
